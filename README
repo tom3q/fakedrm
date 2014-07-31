@@ -1,0 +1,5 @@
+Wrapper library providing emulation of kernel DRM interface
+
+Use with LD_PRELOAD to simulate a fake DRM device on systems without real
+DRM kernel drivers.
+
