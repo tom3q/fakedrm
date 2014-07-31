@@ -156,8 +156,8 @@ static void desc_put(struct dummy_drm_desc *desc)
  * Dummy map descriptors
  */
 
-struct dummy_map_desc {
-	uint32_t handle;
+struct fakedrm_map_data {
+	struct fakedrm_bo_data *bo;
 	void *addr;
 };
 
@@ -444,6 +444,7 @@ static void bo_close(uint32_t handle)
 
 static int bo_map(uint32_t handle, void **out_addr)
 {
+	struct fakedrm_map_data *map;
 	struct fakedrm_bo_data *bo;
 	void *addr = NULL;
 	int ret;
@@ -454,11 +455,18 @@ static int bo_map(uint32_t handle, void **out_addr)
 		return -ENOENT;
 	}
 
+	map = calloc(1, sizeof(*map));
+	if (!map) {
+		ERROR_MSG("failed to allocate map data");
+		return -ENOMEM;
+	}
+
 	ret = ftruncate(handle, FAKEDRM_BO_SHM_HDR_LENGTH + bo->size);
 	if (ret) {
 		ret = -errno;
 		ERROR_MSG("failed to resize BO SHM object: %s",
 				strerror(errno));
+		free(map);
 		return ret;
 	}
 
@@ -467,26 +475,33 @@ static int bo_map(uint32_t handle, void **out_addr)
 	if (addr == MAP_FAILED) {
 		ret = -errno;
 		ERROR_MSG("failed to mmap BO: %s", strerror(errno));
+		free(map);
 		return ret;
 	}
 
 	bo_get(bo);
 
+	map->bo = bo;
+	map->addr = addr;
+	hash_insert(&map_table, (unsigned long)addr, map);
+
 	*out_addr = addr;
 	return 0;
 }
 
-static void bo_unmap(uint32_t handle)
+static int bo_unmap(void *addr, size_t length)
 {
-	struct fakedrm_bo_data *bo;
+	struct fakedrm_map_data *map;
 
-	bo = hash_lookup(&bo_table, handle);
-	if (!bo) {
-		ERROR_MSG("failed to lookup BO name %08x", handle);
-		return;
-	}
+	map = hash_lookup(&map_table, (unsigned long)addr);
+	if (!map)
+		return -ENOENT;
 
-	bo_put(bo);
+	hash_remove(&map_table, (unsigned long)map->addr);
+	bo_put(map->bo);
+	free(map);
+
+	return 0;
 }
 
 /*
@@ -862,27 +877,12 @@ static int dummy_cmd_exynos_gem_create(void *arg)
 static int dummy_cmd_exynos_gem_mmap(void *arg)
 {
 	struct drm_exynos_gem_mmap *req = arg;
-	struct dummy_map_desc *desc;
 	void *addr;
 	int ret;
 
-	desc = calloc(1, sizeof(*desc));
-	if (!desc) {
-		ERROR_MSG("failed to allocate map descriptor: %s",
-				strerror(errno));
-		return -ENOMEM;
-	}
-
 	ret = bo_map(req->handle, &addr);
-	if (ret) {
-		free(desc);
+	if (ret)
 		return ret;
-	}
-
-	desc->handle = req->handle;
-	desc->addr = addr;
-
-	hash_insert(&map_table, (unsigned long)addr, desc);
 
 	req->mapped = VOID2U64(addr);
 	return 0;
@@ -1092,14 +1092,6 @@ static void *dummy_mmap(struct dummy_drm_desc *desc, void *addr, size_t length,
 	return MAP_FAILED;
 }
 
-static int dummy_munmap(struct dummy_map_desc *desc, size_t length)
-{
-	bo_unmap(desc->handle);
-	hash_remove(&map_table, (unsigned long)desc->addr);
-
-	return munmap_real(desc->addr, length);
-}
-
 static int dummy_fstat(struct dummy_drm_desc *desc, int ver, struct stat *buf)
 {
 	/* TODO: Fake stat info */
@@ -1185,15 +1177,15 @@ PUBLIC void *mmap(void *addr, size_t length, int prot, int flags,
 
 PUBLIC int munmap(void *addr, size_t length)
 {
-	struct dummy_map_desc *desc;
+	int ret;
 
 	DEBUG_MSG("%s(addr = %p, length = %lx)", __func__, addr, length);
 
-	desc = hash_lookup(&map_table, (unsigned long)addr);
-	if (desc)
-		return dummy_munmap(desc, length);
+	ret = bo_unmap(addr, length);
+	if (ret == -ENOENT)
+		ret = munmap_real(addr, length);
 
-	return munmap_real(addr, length);
+	return ret;
 }
 
 PUBLIC int __fxstat(int ver, int fd, struct stat *buf)
