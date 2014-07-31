@@ -1292,5 +1292,26 @@ CONSTRUCTOR static void constructor(void)
 
 DESTRUCTOR static void destructor(void)
 {
-	/* TODO: Close open GEM handles */
+	unsigned long key;
+	void *value;
+	int ret;
+
+	ret = drmHashFirst(bo_table.table, &key, &value);
+	while (ret) {
+		struct fakedrm_bo_data *bo = value;
+
+		bo_put(bo);
+
+		ret = drmHashNext(bo_table.table, &key, &value);
+	}
+
+	ret = drmHashFirst(map_table.table, &key, &value);
+	while (ret) {
+		struct fakedrm_map_data *map = value;
+
+		bo_put(map->bo);
+		free(map);
+
+		ret = drmHashNext(map_table.table, &key, &value);
+	}
 }
