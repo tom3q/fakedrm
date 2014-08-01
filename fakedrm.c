@@ -63,7 +63,9 @@
 	do { fprintf(stderr, "[D] "fmt " (%s:%d)\n", \
 		##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
 #else
-#define DEBUG_MSG(fmt, ...)
+#define DEBUG_MSG(fmt, ...) \
+	if (0) { fprintf(stderr, "[D] "fmt " (%s:%d)\n", \
+		##__VA_ARGS__, __FUNCTION__, __LINE__); }
 #endif
 
 #define ERROR_MSG(fmt, ...) \
