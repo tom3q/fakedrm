@@ -453,6 +453,7 @@ static void bo_close(uint32_t handle)
 
 	hash_remove(&bo_table, handle);
 
+	close(handle);
 	bo_put(bo);
 }
 
