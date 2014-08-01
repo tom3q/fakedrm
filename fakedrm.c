@@ -514,6 +514,7 @@ static int bo_unmap(void *addr, size_t length)
 
 	hash_remove(&map_table, (unsigned long)map->addr);
 	bo_put(map->bo);
+	munmap_real(addr, length);
 	free(map);
 
 	return 0;
