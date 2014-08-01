@@ -148,6 +148,8 @@ static void hash_create(struct locked_hash_table *table)
 struct fakedrm_file_desc {
 	int fd;
 	unsigned int refcnt;
+	unsigned int g2d_pipes;
+	unsigned int g3d_pipes;
 	/* More to come */
 };
 
@@ -929,33 +931,65 @@ static int dummy_cmd_exynos_gem_mmap(void *arg)
 		DRM_COMMAND_BASE + DRM_EXYNOS_G2D_SUBMIT,	\
 		sizeof(struct drm_exynos_g3d_submit))
 
-static int dummy_cmd_exynos_g3d_create_pipe(void *arg)
+static int dummy_cmd_exynos_g3d_create_pipe(struct fakedrm_file_desc *desc,
+					    void *arg)
+{
+	struct drm_exynos_g3d_pipe *pipe = arg;
+
+	if (desc->g3d_pipes == -1U)
+		return -ENOMEM;
+
+	pipe->pipe = ++desc->g3d_pipes;
+
+	return 0;
+}
+
+static int dummy_cmd_exynos_g2d_create_pipe(struct fakedrm_file_desc *desc,
+					    void *arg)
+{
+	struct drm_exynos_g3d_pipe *pipe = arg;
+
+	if (desc->g2d_pipes == -1U)
+		return -ENOMEM;
+
+	pipe->pipe = ++desc->g2d_pipes;
+
+	return 0;
+}
+
+static int dummy_cmd_exynos_g3d_destroy_pipe(struct fakedrm_file_desc *desc,
+					     void *arg)
 {
 	return 0;
 }
 
-static int dummy_cmd_exynos_g2d_create_pipe(void *arg)
+static int dummy_cmd_exynos_g2d_destroy_pipe(struct fakedrm_file_desc *desc,
+					     void *arg)
 {
 	return 0;
 }
 
-static int dummy_cmd_exynos_g3d_destroy_pipe(void *arg)
+static int dummy_cmd_exynos_g3d_submit(struct fakedrm_file_desc *desc,
+				       void *arg)
 {
+	struct drm_exynos_g3d_submit *submit = arg;
+
+	DEBUG_MSG("pipe = %d, handle = %08x, offset = %08x, length = %08x",
+			submit->pipe, submit->handle, submit->offset,
+			submit->length);
+
 	return 0;
 }
 
-static int dummy_cmd_exynos_g2d_destroy_pipe(void *arg)
+static int dummy_cmd_exynos_g2d_submit(struct fakedrm_file_desc *desc,
+				       void *arg)
 {
-	return 0;
-}
+	struct drm_exynos_g3d_submit *submit = arg;
 
-static int dummy_cmd_exynos_g3d_submit(void *arg)
-{
-	return 0;
-}
+	DEBUG_MSG("pipe = %d, handle = %08x, offset = %08x, length = %08x",
+			submit->pipe, submit->handle, submit->offset,
+			submit->length);
 
-static int dummy_cmd_exynos_g2d_submit(void *arg)
-{
 	return 0;
 }
 
@@ -1064,22 +1098,22 @@ static int dummy_ioctl(struct fakedrm_file_desc *desc, unsigned long request,
 
 	/* Exynos-specific pipe IOCTLs */
 	case CMD_IOCTL_DRM_EXYNOS_G3D_CREATE_PIPE:
-		ret = dummy_cmd_exynos_g3d_create_pipe(arg);
+		ret = dummy_cmd_exynos_g3d_create_pipe(desc, arg);
 		break;
 	case CMD_IOCTL_DRM_EXYNOS_G2D_CREATE_PIPE:
-		ret = dummy_cmd_exynos_g2d_create_pipe(arg);
+		ret = dummy_cmd_exynos_g2d_create_pipe(desc, arg);
 		break;
 	case CMD_IOCTL_DRM_EXYNOS_G3D_DESTROY_PIPE:
-		ret = dummy_cmd_exynos_g3d_destroy_pipe(arg);
+		ret = dummy_cmd_exynos_g3d_destroy_pipe(desc, arg);
 		break;
 	case CMD_IOCTL_DRM_EXYNOS_G2D_DESTROY_PIPE:
-		ret = dummy_cmd_exynos_g2d_destroy_pipe(arg);
+		ret = dummy_cmd_exynos_g2d_destroy_pipe(desc, arg);
 		break;
 	case CMD_IOCTL_DRM_EXYNOS_G3D_SUBMIT:
-		ret = dummy_cmd_exynos_g3d_submit(arg);
+		ret = dummy_cmd_exynos_g3d_submit(desc, arg);
 		break;
 	case CMD_IOCTL_DRM_EXYNOS_G2D_SUBMIT:
-		ret = dummy_cmd_exynos_g2d_submit(arg);
+		ret = dummy_cmd_exynos_g2d_submit(desc, arg);
 		break;
 
 	default:
