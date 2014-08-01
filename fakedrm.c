@@ -68,6 +68,16 @@
 		##__VA_ARGS__, __FUNCTION__, __LINE__); }
 #endif
 
+#ifdef DEBUG_VERBOSE
+#define VERBOSE_MSG(fmt, ...) \
+	do { fprintf(stderr, "[V] "fmt " (%s:%d)\n", \
+		##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
+#else
+#define VERBOSE_MSG(fmt, ...) \
+	if (0) { fprintf(stderr, "[V] "fmt " (%s:%d)\n", \
+		##__VA_ARGS__, __FUNCTION__, __LINE__); }
+#endif
+
 #define ERROR_MSG(fmt, ...) \
 	do { fprintf(stderr, "[E] "fmt " (%s:%d)\n", \
 		##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
@@ -1115,7 +1125,7 @@ PUBLIC int open(const char *pathname, int flags, ...)
 		va_end(args);
 	}
 
-	DEBUG_MSG("%s(pathname = '%s', flags = %d, mode = %x)",
+	VERBOSE_MSG("%s(pathname = '%s', flags = %d, mode = %x)",
 		__func__, pathname, flags, mode);
 
 	if (!strcmp(pathname, "/dev/dri/card0"))
@@ -1128,7 +1138,7 @@ PUBLIC int close(int fd)
 {
 	struct dummy_drm_desc *desc;
 
-	DEBUG_MSG("%s(fd = %d)", __func__, fd);
+	VERBOSE_MSG("%s(fd = %d)", __func__, fd);
 
 	desc = hash_lookup(&desc_table, fd);
 	if (desc)
@@ -1150,7 +1160,7 @@ PUBLIC int ioctl(int d, unsigned long request, ...)
 		va_end(args);
 	}
 
-	DEBUG_MSG("%s(d = %d, request = %lx, argp = %p)",
+	VERBOSE_MSG("%s(d = %d, request = %lx, argp = %p)",
 		__func__, d, request, argp);
 
 	if (_IOC_TYPE(request) == DRM_IOCTL_BASE) {
@@ -1167,7 +1177,7 @@ PUBLIC void *mmap(void *addr, size_t length, int prot, int flags,
 {
 	struct dummy_drm_desc *desc;
 
-	DEBUG_MSG("%s(addr = %p, length = %lx, prot = %d, flags = %d, fd = %d, offset = %lx)",
+	VERBOSE_MSG("%s(addr = %p, length = %lx, prot = %d, flags = %d, fd = %d, offset = %lx)",
 		__func__, addr, length, prot, flags, fd, offset);
 
 	desc = hash_lookup(&desc_table, fd);
@@ -1181,7 +1191,7 @@ PUBLIC int munmap(void *addr, size_t length)
 {
 	int ret;
 
-	DEBUG_MSG("%s(addr = %p, length = %lx)", __func__, addr, length);
+	VERBOSE_MSG("%s(addr = %p, length = %lx)", __func__, addr, length);
 
 	ret = bo_unmap(addr, length);
 	if (ret == -ENOENT)
@@ -1194,7 +1204,7 @@ PUBLIC int __fxstat(int ver, int fd, struct stat *buf)
 {
 	struct dummy_drm_desc *desc;
 
-	DEBUG_MSG("%s(ver = %d, fd = %d, buf = %p)",
+	VERBOSE_MSG("%s(ver = %d, fd = %d, buf = %p)",
 		__func__, ver, fd, buf);
 
 	desc = hash_lookup(&desc_table, fd);
@@ -1206,7 +1216,7 @@ PUBLIC int __fxstat(int ver, int fd, struct stat *buf)
 
 PUBLIC int __xstat(int ver, const char *pathname, struct stat *buf)
 {
-	DEBUG_MSG("%s(ver = %d, pathname = '%s', buf = %p)",
+	VERBOSE_MSG("%s(ver = %d, pathname = '%s', buf = %p)",
 		__func__, ver, pathname, buf);
 
 	if (strstr(pathname, "/dev/dri"))
