@@ -56,7 +56,7 @@
 #define CONSTRUCTOR		__attribute__((constructor))
 #define DESTRUCTOR		__attribute__((destructor))
 
-//#define DEBUG
+#define DEBUG
 
 #ifdef DEBUG
 #define DEBUG_MSG(fmt, ...) \
