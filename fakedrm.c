@@ -57,6 +57,8 @@
 #define DESTRUCTOR		__attribute__((destructor))
 
 #define DEBUG
+//#define DEBUG_REFCNT
+//#define DEBUG_VERBOSE
 
 #ifdef DEBUG
 #define DEBUG_MSG(fmt, ...) \
@@ -84,6 +86,7 @@
 
 #include "exynos_drm.h"
 
+static volatile sig_atomic_t cleanup_in_progress;
 static sigset_t captured_signals;
 
 /*
@@ -114,16 +117,30 @@ static void hash_insert(struct locked_hash_table *table,
 	pthread_rwlock_unlock(&table->lock);
 }
 
-static void *hash_lookup(struct locked_hash_table *table, unsigned long key)
+typedef void (*hash_callback_t)(void *);
+
+static void *hash_lookup_callback(struct locked_hash_table *table,
+				  unsigned long key,
+				  hash_callback_t func)
 {
 	void *value;
 	int ret;
 
 	pthread_rwlock_rdlock(&table->lock);
+
 	ret = drmHashLookup(table->table, key, &value);
+	if (!ret && func)
+		func(value);
+
 	pthread_rwlock_unlock(&table->lock);
 
 	return ret ? NULL : value;
+}
+
+static inline void *hash_lookup(struct locked_hash_table *table,
+				unsigned long key)
+{
+	return hash_lookup_callback(table, key, NULL);
 }
 
 static void hash_remove(struct locked_hash_table *table, unsigned long key)
@@ -143,6 +160,11 @@ static void hash_create(struct locked_hash_table *table)
 	}
 }
 
+static void hash_destroy(struct locked_hash_table *table)
+{
+	drmHashDestroy(table->table);
+}
+
 /*
  * Dummy file descriptors
  */
@@ -152,29 +174,54 @@ struct fakedrm_file_desc {
 	unsigned int refcnt;
 	unsigned int g2d_pipes;
 	unsigned int g3d_pipes;
+	struct locked_hash_table bo_table;
 	/* More to come */
 };
 
-static struct locked_hash_table desc_table;
+static struct locked_hash_table file_table;
 
-static void desc_get(struct fakedrm_file_desc *desc)
+static void __file_get(struct fakedrm_file_desc *file)
 {
-	__sync_add_and_fetch(&desc->refcnt, 1);
+	__sync_add_and_fetch(&file->refcnt, 1);
 }
 
-static void desc_put(struct fakedrm_file_desc *desc)
+static void __file_put(struct fakedrm_file_desc *file)
 {
-	if (__sync_sub_and_fetch(&desc->refcnt, 1) == 0)
-		free(desc);
+	if (__sync_sub_and_fetch(&file->refcnt, 1) == 0) {
+		hash_destroy(&file->bo_table);
+		free(file);
+	}
 }
+
+#ifdef DEBUG_REFCNT
+static void __file_get_debug(struct fakedrm_file_desc *file,
+			   const char *func, int line)
+{
+	DEBUG_MSG("file_get(%p) from %s():%d", file, func, line);
+	__file_get(file);
+}
+#define file_get(file)		__file_get_debug(file, __func__, __LINE__)
+
+static void __file_put_debug(struct fakedrm_file_desc *file,
+			   const char *func, int line)
+{
+	DEBUG_MSG("file_put(%p) from %s():%d", file, func, line);
+	__file_put(file);
+}
+#define file_put(file)		__file_put_debug(file, __func__, __LINE__)
+#else
+#define file_get		__file_get
+#define file_put		__file_put
+#endif
 
 /*
  * Dummy map descriptors
  */
 
 struct fakedrm_map_data {
-	struct fakedrm_bo_data *bo;
+	struct fakedrm_bo_handle *handle;
 	void *addr;
+	size_t length;
 };
 
 static struct locked_hash_table map_table;
@@ -200,13 +247,19 @@ struct fakedrm_bo_data {
 	uint32_t refcnt;
 };
 
+struct fakedrm_bo_handle {
+	struct fakedrm_file_desc *file;
+	struct fakedrm_bo_data *bo;
+	int fd;
+	uint32_t refcnt;
+};
+
 static sem_t *bo_sem;
 static int bo_shm;
 static void *bo_shm_mem;
 static uint32_t *bo_bitmap;
 static uint32_t bo_bitmap_size;
 static struct fakedrm_bo_ctrl *bo_ctrl;
-static struct locked_hash_table bo_table;
 
 static int __bo_remap_bitmap(void)
 {
@@ -309,100 +362,175 @@ static void bo_put_name(uint32_t name)
 	sem_post(bo_sem);
 }
 
-static void bo_get(struct fakedrm_bo_data *bo)
+static void __bo_get(struct fakedrm_bo_data *bo)
 {
 	__sync_add_and_fetch(&bo->refcnt, 1);
 }
 
-static void bo_put(struct fakedrm_bo_data *bo)
+static void __bo_put(struct fakedrm_bo_data *bo)
 {
 	char pathname[] = "/fakedrm_bo.012345678";
 	uint32_t name = bo->name;
 
-	if (__sync_sub_and_fetch(&bo->refcnt, 1))
-		return;
-
-	munmap(bo, FAKEDRM_BO_SHM_HDR_LENGTH);
-
-	snprintf(pathname, sizeof(pathname), "/fakedrm_bo.%08x", name);
-	shm_unlink(pathname);
-
-	bo_put_name(name);
+	if (__sync_sub_and_fetch(&bo->refcnt, 1) == 0) {
+		snprintf(pathname, sizeof(pathname), "/fakedrm_bo.%08x", name);
+		shm_unlink(pathname);
+		bo_put_name(name);
+	}
 }
 
-static int bo_import(uint32_t name, uint32_t *handle, uint32_t *size)
+#ifdef DEBUG_REFCNT
+static void __bo_get_debug(struct fakedrm_bo_data *bo,
+			   const char *func, int line)
+{
+	DEBUG_MSG("bo_get(%p) from %s():%d", bo, func, line);
+	__bo_get(bo);
+}
+#define bo_get(bo)		__bo_get_debug(bo, __func__, __LINE__)
+
+static void __bo_put_debug(struct fakedrm_bo_data *bo,
+			   const char *func, int line)
+{
+	DEBUG_MSG("bo_put(%p) from %s():%d", bo, func, line);
+	__bo_put(bo);
+}
+#define bo_put(bo)		__bo_put_debug(bo, __func__, __LINE__)
+#else
+#define bo_get		__bo_get
+#define bo_put		__bo_put
+#endif
+
+static void __bo_handle_get(struct fakedrm_bo_handle *handle)
+{
+	if (__sync_add_and_fetch(&handle->refcnt, 1) == 1) {
+		bo_get(handle->bo);
+		file_get(handle->file);
+	}
+}
+
+static void __bo_handle_put(struct fakedrm_bo_handle *handle)
+{
+	if (__sync_sub_and_fetch(&handle->refcnt, 1) == 0) {
+		file_put(handle->file);
+		bo_put(handle->bo);
+		munmap_real(handle->bo, FAKEDRM_BO_SHM_HDR_LENGTH);
+		if (!cleanup_in_progress)
+			free(handle);
+	}
+}
+
+#ifdef DEBUG_REFCNT
+static void __bo_handle_get_debug(struct fakedrm_bo_handle *handle,
+			   const char *func, int line)
+{
+	DEBUG_MSG("bo_handle_get(%p) from %s():%d", handle, func, line);
+	__bo_handle_get(handle);
+}
+#define bo_handle_get(handle)	__bo_handle_get_debug(handle, __func__, __LINE__)
+
+static void __bo_handle_put_debug(struct fakedrm_bo_handle *handle,
+			   const char *func, int line)
+{
+	DEBUG_MSG("bo_handle_put(%p) from %s():%d", handle, func, line);
+	__bo_handle_put(handle);
+}
+#define bo_handle_put(handle)	__bo_handle_put_debug(handle, __func__, __LINE__)
+#else
+#define bo_handle_get		__bo_handle_get
+#define bo_handle_put		__bo_handle_put
+#endif
+
+static int bo_import(struct fakedrm_file_desc *file, uint32_t name,
+		     uint32_t *out_handle, uint32_t *size)
 {
 	char pathname[] = "/fakedrm_bo.012345678";
-	struct fakedrm_bo_data *bo;
+	struct fakedrm_bo_handle *handle;
 	sigset_t oldmask;
-	int obj_shm;
 	int ret;
+
+	handle = calloc(1, sizeof(*handle));
+	if (!handle) {
+		ERROR_MSG("failed to allocate BO handle data");
+		return -ENOMEM;
+	}
+	handle->file = file;
 
 	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
 
 	snprintf(pathname, sizeof(pathname), "/fakedrm_bo.%08x", name);
-	obj_shm = shm_open(pathname, O_RDWR,
+	handle->fd = shm_open(pathname, O_RDWR,
 				S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP);
-	if (obj_shm < 0) {
+	if (handle->fd < 0) {
 		ret = -errno;
 		ERROR_MSG("failed to open BO SHM object: %s",
 				strerror(errno));
 		goto err_sigmask;
 	}
 
-	bo = mmap(NULL, FAKEDRM_BO_SHM_HDR_LENGTH, PROT_READ | PROT_WRITE,
-			MAP_SHARED, obj_shm, 0);
-	if (bo == MAP_FAILED) {
+	handle->bo = mmap_real(NULL, FAKEDRM_BO_SHM_HDR_LENGTH,
+				PROT_READ | PROT_WRITE, MAP_SHARED,
+				handle->fd, 0);
+	if (handle->bo == MAP_FAILED) {
 		ret = -errno;
 		ERROR_MSG("failed to map BO SHM object header: %s",
 				strerror(errno));
 		goto err_shm;
 	}
 
-	*handle = obj_shm;
-	*size = bo->size;
+	*out_handle = handle->fd;
+	*size = handle->bo->size;
 
-	bo_get(bo);
-
-	hash_insert(&bo_table, obj_shm, bo);
+	bo_handle_get(handle);
+	hash_insert(&file->bo_table, handle->fd, handle);
 
 	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 
 	return 0;
 
 err_shm:
-	close(obj_shm);
+	close_real(handle->fd);
 err_sigmask:
 	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+	free(handle);
 
 	return ret;
 }
 
-static int bo_export(uint32_t handle, uint32_t *name)
+static int bo_export(struct fakedrm_file_desc *file, uint32_t handle,
+		     uint32_t *name)
 {
-	struct fakedrm_bo_data *bo;
+	struct fakedrm_bo_handle *handle_data;
 	int ret = 0;
 
-	bo = hash_lookup(&bo_table, handle);
-	if (!bo) {
-		ERROR_MSG("failed to lookup BO name %08x", handle);
+	handle_data = hash_lookup_callback(&file->bo_table, handle,
+					(hash_callback_t)__bo_handle_get);
+	if (!handle_data) {
+		ERROR_MSG("failed to lookup BO handle %08x", handle);
 		return -ENOENT;
 	}
 
-	*name = bo->name;
+	*name = handle_data->bo->name;
+
+	bo_handle_put(handle_data);
 
 	return ret;
 }
 
-static int bo_create(uint32_t size,
-			 uint32_t *out_handle)
+static int bo_create(struct fakedrm_file_desc *file, uint32_t size,
+		     uint32_t *out_handle)
 {
 	char pathname[] = "/fakedrm_bo.012345678";
-	struct fakedrm_bo_data *bo;
+	struct fakedrm_bo_handle *handle;
 	sigset_t oldmask;
 	uint32_t name;
-	int obj_shm;
 	int ret;
+
+	handle = calloc(1, sizeof(*handle));
+	if (!handle) {
+		ERROR_MSG("failed to allocate BO handle data");
+		return -ENOMEM;
+	}
+	handle->file = file;
 
 	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
 
@@ -414,16 +542,16 @@ static int bo_create(uint32_t size,
 	}
 
 	snprintf(pathname, sizeof(pathname), "/fakedrm_bo.%08x", name);
-	obj_shm = shm_open(pathname, O_RDWR | O_CREAT | O_EXCL,
+	handle->fd = shm_open(pathname, O_RDWR | O_CREAT | O_EXCL,
 				S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP);
-	if (obj_shm < 0) {
+	if (handle->fd < 0) {
 		ret = -errno;
 		ERROR_MSG("failed to create BO SHM object: %s",
 				strerror(errno));
 		goto err_handle;
 	}
 
-	ret = ftruncate(obj_shm, FAKEDRM_BO_SHM_HDR_LENGTH);
+	ret = ftruncate(handle->fd, FAKEDRM_BO_SHM_HDR_LENGTH);
 	if (ret) {
 		ret = -errno;
 		ERROR_MSG("failed to resize BO SHM object: %s",
@@ -431,21 +559,22 @@ static int bo_create(uint32_t size,
 		goto err_close_unlink;
 	}
 
-	bo = mmap(NULL, FAKEDRM_BO_SHM_HDR_LENGTH, PROT_READ | PROT_WRITE,
-			MAP_SHARED, obj_shm, 0);
-	if (bo == MAP_FAILED) {
+	handle->bo = mmap(NULL, FAKEDRM_BO_SHM_HDR_LENGTH,
+				PROT_READ | PROT_WRITE, MAP_SHARED,
+				handle->fd, 0);
+	if (handle->bo == MAP_FAILED) {
 		ret = -errno;
 		ERROR_MSG("failed to map BO SHM object header: %s",
 				strerror(errno));
 		goto err_close_unlink;
 	}
 
-	*out_handle = obj_shm;
-	bo->name = name;
-	bo->size = size;
-	bo->refcnt = 1;
+	*out_handle = handle->fd;
+	handle->bo->name = name;
+	handle->bo->size = size;
 
-	hash_insert(&bo_table, obj_shm, bo);
+	bo_handle_get(handle);
+	hash_insert(&file->bo_table, handle->fd, handle);
 
 	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 
@@ -453,47 +582,50 @@ static int bo_create(uint32_t size,
 
 err_close_unlink:
 	shm_unlink(pathname);
-	close(obj_shm);
+	close_real(handle->fd);
 err_handle:
 	bo_put_name(name);
 err_sigmask:
 	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+	free(handle);
 
 	return ret;
 }
 
-static void bo_close(uint32_t handle)
+static void bo_close(struct fakedrm_file_desc *file, uint32_t handle)
 {
-	struct fakedrm_bo_data *bo;
+	struct fakedrm_bo_handle *handle_data;
 	sigset_t oldmask;
 
-	bo = hash_lookup(&bo_table, handle);
-	if (!bo) {
-		ERROR_MSG("failed to lookup BO name %08x", handle);
+	handle_data = hash_lookup(&file->bo_table, handle);
+	if (!handle_data) {
+		ERROR_MSG("failed to lookup BO handle %08x", handle);
 		return;
 	}
 
 	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
 
-	hash_remove(&bo_table, handle);
-
-	close(handle);
-	bo_put(bo);
+	hash_remove(&file->bo_table, handle);
+	bo_handle_put(handle_data);
+	close_real(handle_data->fd);
+	handle_data->fd = -1;
 
 	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 }
 
-static int bo_map(uint32_t handle, void **out_addr)
+static int bo_map(struct fakedrm_file_desc *file, uint32_t handle,
+		  void **out_addr)
 {
+	struct fakedrm_bo_handle *handle_data;
 	struct fakedrm_map_data *map;
-	struct fakedrm_bo_data *bo;
 	sigset_t oldmask;
 	void *addr = NULL;
 	int ret;
 
-	bo = hash_lookup(&bo_table, handle);
-	if (!bo) {
-		ERROR_MSG("failed to lookup BO name %08x", handle);
+	handle_data = hash_lookup_callback(&file->bo_table, handle,
+					(hash_callback_t)__bo_handle_get);
+	if (!handle_data) {
+		ERROR_MSG("failed to lookup BO handle %08x", handle);
 		return -ENOENT;
 	}
 
@@ -506,7 +638,8 @@ static int bo_map(uint32_t handle, void **out_addr)
 		goto err_sigmask;
 	}
 
-	ret = ftruncate(handle, FAKEDRM_BO_SHM_HDR_LENGTH + bo->size);
+	ret = ftruncate(handle, FAKEDRM_BO_SHM_HDR_LENGTH
+			+ handle_data->bo->size);
 	if (ret) {
 		ret = -errno;
 		ERROR_MSG("failed to resize BO SHM object: %s",
@@ -514,18 +647,17 @@ static int bo_map(uint32_t handle, void **out_addr)
 		goto err_data;
 	}
 
-	addr = mmap(NULL, bo->size, PROT_READ | PROT_WRITE, MAP_SHARED,
-			handle, FAKEDRM_BO_SHM_HDR_LENGTH);
+	addr = mmap_real(NULL, handle_data->bo->size, PROT_READ | PROT_WRITE,
+				MAP_SHARED, handle, FAKEDRM_BO_SHM_HDR_LENGTH);
 	if (addr == MAP_FAILED) {
 		ret = -errno;
 		ERROR_MSG("failed to mmap BO: %s", strerror(errno));
 		goto err_data;
 	}
 
-	bo_get(bo);
-
-	map->bo = bo;
+	map->handle = handle_data;
 	map->addr = addr;
+	map->length = handle_data->bo->size;
 	hash_insert(&map_table, (unsigned long)addr, map);
 
 	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
@@ -537,6 +669,7 @@ err_data:
 	free(map);
 err_sigmask:
 	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+	bo_handle_put(handle_data);
 
 	return ret;
 }
@@ -553,8 +686,8 @@ static int bo_unmap(void *addr, size_t length)
 	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
 
 	hash_remove(&map_table, (unsigned long)map->addr);
-	bo_put(map->bo);
-	munmap_real(addr, length);
+	bo_handle_put(map->handle);
+	munmap_real(map->addr, map->length);
 	free(map);
 
 	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
@@ -884,32 +1017,32 @@ static int dummy_mode_page_flip(void *arg)
  * Generic GEM IOCTLs
  */
 
-static int dummy_gem_open(void *arg)
+static int dummy_gem_open(struct fakedrm_file_desc *file, void *arg)
 {
 	struct drm_gem_open *req = arg;
 	uint32_t size;
 	int ret;
 
-	ret = bo_import(req->name, &req->handle, &size);
+	ret = bo_import(file, req->name, &req->handle, &size);
 	req->size = size;
 
 	return ret;
 }
 
-static int dummy_gem_close(void *arg)
+static int dummy_gem_close(struct fakedrm_file_desc *file, void *arg)
 {
 	struct drm_gem_close *req = arg;
 
-	bo_close(req->handle);
+	bo_close(file, req->handle);
 
 	return 0;
 }
 
-static int dummy_gem_flink(void *arg)
+static int dummy_gem_flink(struct fakedrm_file_desc *file, void *arg)
 {
 	struct drm_gem_flink *req = arg;
 
-	return bo_export(req->handle, &req->name);
+	return bo_export(file, req->handle, &req->name);
 }
 
 /*
@@ -925,20 +1058,21 @@ static int dummy_gem_flink(void *arg)
 		DRM_COMMAND_BASE + DRM_EXYNOS_GEM_MMAP,	\
 		sizeof(struct drm_exynos_gem_mmap))
 
-static int dummy_cmd_exynos_gem_create(void *arg)
+static int dummy_cmd_exynos_gem_create(struct fakedrm_file_desc *file,
+				       void *arg)
 {
 	struct drm_exynos_gem_create *req = arg;
 
-	return bo_create(req->size, &req->handle);
+	return bo_create(file, req->size, &req->handle);
 }
 
-static int dummy_cmd_exynos_gem_mmap(void *arg)
+static int dummy_cmd_exynos_gem_mmap(struct fakedrm_file_desc *file, void *arg)
 {
 	struct drm_exynos_gem_mmap *req = arg;
 	void *addr;
 	int ret;
 
-	ret = bo_map(req->handle, &addr);
+	ret = bo_map(file, req->handle, &addr);
 	if (ret)
 		return ret;
 
@@ -975,45 +1109,45 @@ static int dummy_cmd_exynos_gem_mmap(void *arg)
 		DRM_COMMAND_BASE + DRM_EXYNOS_G2D_SUBMIT,	\
 		sizeof(struct drm_exynos_g3d_submit))
 
-static int dummy_cmd_exynos_g3d_create_pipe(struct fakedrm_file_desc *desc,
+static int dummy_cmd_exynos_g3d_create_pipe(struct fakedrm_file_desc *file,
 					    void *arg)
 {
 	struct drm_exynos_g3d_pipe *pipe = arg;
 
-	if (desc->g3d_pipes == -1U)
+	if (file->g3d_pipes == -1U)
 		return -ENOMEM;
 
-	pipe->pipe = ++desc->g3d_pipes;
+	pipe->pipe = ++file->g3d_pipes;
 
 	return 0;
 }
 
-static int dummy_cmd_exynos_g2d_create_pipe(struct fakedrm_file_desc *desc,
+static int dummy_cmd_exynos_g2d_create_pipe(struct fakedrm_file_desc *file,
 					    void *arg)
 {
 	struct drm_exynos_g3d_pipe *pipe = arg;
 
-	if (desc->g2d_pipes == -1U)
+	if (file->g2d_pipes == -1U)
 		return -ENOMEM;
 
-	pipe->pipe = ++desc->g2d_pipes;
+	pipe->pipe = ++file->g2d_pipes;
 
 	return 0;
 }
 
-static int dummy_cmd_exynos_g3d_destroy_pipe(struct fakedrm_file_desc *desc,
+static int dummy_cmd_exynos_g3d_destroy_pipe(struct fakedrm_file_desc *file,
 					     void *arg)
 {
 	return 0;
 }
 
-static int dummy_cmd_exynos_g2d_destroy_pipe(struct fakedrm_file_desc *desc,
+static int dummy_cmd_exynos_g2d_destroy_pipe(struct fakedrm_file_desc *file,
 					     void *arg)
 {
 	return 0;
 }
 
-static int dummy_cmd_exynos_g3d_submit(struct fakedrm_file_desc *desc,
+static int dummy_cmd_exynos_g3d_submit(struct fakedrm_file_desc *file,
 				       void *arg)
 {
 	struct drm_exynos_g3d_submit *submit = arg;
@@ -1025,7 +1159,7 @@ static int dummy_cmd_exynos_g3d_submit(struct fakedrm_file_desc *desc,
 	return 0;
 }
 
-static int dummy_cmd_exynos_g2d_submit(struct fakedrm_file_desc *desc,
+static int dummy_cmd_exynos_g2d_submit(struct fakedrm_file_desc *file,
 				       void *arg)
 {
 	struct drm_exynos_g3d_submit *submit = arg;
@@ -1040,42 +1174,78 @@ static int dummy_cmd_exynos_g2d_submit(struct fakedrm_file_desc *desc,
 /*
  * Implementation of file operations for emulated DRM devices
  */
-static int dummy_open(const char *pathname, int flags, mode_t mode)
+static int file_open(const char *pathname, int flags, mode_t mode)
 {
-	struct fakedrm_file_desc *desc;
+	struct fakedrm_file_desc *file;
+	sigset_t oldmask;
 	int fd;
+
+	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
 
 	fd = open_real("/dev/null", O_RDWR, 0);
 	if (!fd) {
 		ERROR_MSG("failed to open '/dev/null': %s",
 			strerror(errno));
-		return -1;
+		goto err_sigmask;
 	}
 
-	desc = calloc(1, sizeof(*desc));
-	if (!desc) {
-		ERROR_MSG("failed to allocate descriptor");
-		close(fd);
+	file = calloc(1, sizeof(*file));
+	if (!file) {
+		ERROR_MSG("failed to allocate file descriptor");
 		errno = ENOMEM;
-		return -1;
+		goto err_close;
 	}
 
-	desc_get(desc);
-	desc->fd = fd;
+	hash_create(&file->bo_table);
+	file->fd = fd;
 
-	hash_insert(&desc_table, fd, desc);
+	file_get(file);
+	hash_insert(&file_table, fd, file);
+
+	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 
 	return fd;
+
+err_close:
+	close_real(fd);
+err_sigmask:
+	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+
+	return -1;
 }
 
-static void dummy_close(struct fakedrm_file_desc *desc)
+static void __file_close(struct fakedrm_file_desc *file)
 {
-	hash_remove(&desc_table, desc->fd);
-	desc->fd = -1;
-	desc_put(desc);
+	unsigned long key;
+	void *value;
+	int ret;
+
+	ret = drmHashFirst(file->bo_table.table, &key, &value);
+	while (ret) {
+		struct fakedrm_bo_handle *handle = value;
+
+		bo_handle_put(handle);
+
+		ret = drmHashNext(file->bo_table.table, &key, &value);
+	}
 }
 
-static int dummy_ioctl(struct fakedrm_file_desc *desc, unsigned long request,
+static void file_close(struct fakedrm_file_desc *file)
+{
+	sigset_t oldmask;
+
+	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
+
+	hash_remove(&file_table, file->fd);
+	__file_close(file);
+	close_real(file->fd);
+	file->fd = -1;
+	file_put(file);
+
+	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+}
+
+static int file_ioctl(struct fakedrm_file_desc *file, unsigned long request,
 		       void *arg)
 {
 	int ret;
@@ -1123,41 +1293,41 @@ static int dummy_ioctl(struct fakedrm_file_desc *desc, unsigned long request,
 
 	/* Generic GEM IOCTLs */
 	case DRM_IOCTL_GEM_OPEN:
-		ret = dummy_gem_open(arg);
+		ret = dummy_gem_open(file, arg);
 		break;
 	case DRM_IOCTL_GEM_CLOSE:
-		ret = dummy_gem_close(arg);
+		ret = dummy_gem_close(file, arg);
 		break;
 	case DRM_IOCTL_GEM_FLINK:
-		ret = dummy_gem_flink(arg);
+		ret = dummy_gem_flink(file, arg);
 		break;
 
 	/* Exynos-specific GEM IOCTLs */
 	case CMD_IOCTL_DRM_EXYNOS_GEM_CREATE:
-		ret = dummy_cmd_exynos_gem_create(arg);
+		ret = dummy_cmd_exynos_gem_create(file, arg);
 		break;
 	case CMD_IOCTL_DRM_EXYNOS_GEM_MMAP:
-		ret = dummy_cmd_exynos_gem_mmap(arg);
+		ret = dummy_cmd_exynos_gem_mmap(file, arg);
 		break;
 
 	/* Exynos-specific pipe IOCTLs */
 	case CMD_IOCTL_DRM_EXYNOS_G3D_CREATE_PIPE:
-		ret = dummy_cmd_exynos_g3d_create_pipe(desc, arg);
+		ret = dummy_cmd_exynos_g3d_create_pipe(file, arg);
 		break;
 	case CMD_IOCTL_DRM_EXYNOS_G2D_CREATE_PIPE:
-		ret = dummy_cmd_exynos_g2d_create_pipe(desc, arg);
+		ret = dummy_cmd_exynos_g2d_create_pipe(file, arg);
 		break;
 	case CMD_IOCTL_DRM_EXYNOS_G3D_DESTROY_PIPE:
-		ret = dummy_cmd_exynos_g3d_destroy_pipe(desc, arg);
+		ret = dummy_cmd_exynos_g3d_destroy_pipe(file, arg);
 		break;
 	case CMD_IOCTL_DRM_EXYNOS_G2D_DESTROY_PIPE:
-		ret = dummy_cmd_exynos_g2d_destroy_pipe(desc, arg);
+		ret = dummy_cmd_exynos_g2d_destroy_pipe(file, arg);
 		break;
 	case CMD_IOCTL_DRM_EXYNOS_G3D_SUBMIT:
-		ret = dummy_cmd_exynos_g3d_submit(desc, arg);
+		ret = dummy_cmd_exynos_g3d_submit(file, arg);
 		break;
 	case CMD_IOCTL_DRM_EXYNOS_G2D_SUBMIT:
-		ret = dummy_cmd_exynos_g2d_submit(desc, arg);
+		ret = dummy_cmd_exynos_g2d_submit(file, arg);
 		break;
 
 	default:
@@ -1176,16 +1346,16 @@ static int dummy_ioctl(struct fakedrm_file_desc *desc, unsigned long request,
 	return 0;
 }
 
-static void *dummy_mmap(struct fakedrm_file_desc *desc, void *addr, size_t length,
-			int prot, int flags, off_t offset)
+static void *file_mmap(struct fakedrm_file_desc *file, void *addr,
+		       size_t length, int prot, int flags, off_t offset)
 {
 	return MAP_FAILED;
 }
 
-static int dummy_fstat(struct fakedrm_file_desc *desc, int ver, struct stat *buf)
+static int file_fstat(struct fakedrm_file_desc *file, int ver, struct stat *buf)
 {
 	/* TODO: Fake stat info */
-	return __fxstat_real(ver, desc->fd, buf);
+	return __fxstat_real(ver, file->fd, buf);
 }
 
 /*
@@ -1207,20 +1377,20 @@ PUBLIC int open(const char *pathname, int flags, ...)
 		__func__, pathname, flags, mode);
 
 	if (!strcmp(pathname, "/dev/dri/card0"))
-		return dummy_open(pathname, flags, mode);
+		return file_open(pathname, flags, mode);
 
 	return open_real(pathname, flags, mode);
 }
 
 PUBLIC int close(int fd)
 {
-	struct fakedrm_file_desc *desc;
+	struct fakedrm_file_desc *file;
 
 	VERBOSE_MSG("%s(fd = %d)", __func__, fd);
 
-	desc = hash_lookup(&desc_table, fd);
-	if (desc)
-		dummy_close(desc);
+	file = hash_lookup(&file_table, fd);
+	if (file)
+		file_close(file);
 
 	return close_real(fd);
 }
@@ -1228,7 +1398,7 @@ PUBLIC int close(int fd)
 PUBLIC int ioctl(int d, unsigned long request, ...)
 {
 	unsigned dir = _IOC_DIR(request);
-	struct fakedrm_file_desc *desc;
+	struct fakedrm_file_desc *file;
 	char *argp = NULL;
 	va_list args;
 
@@ -1242,9 +1412,9 @@ PUBLIC int ioctl(int d, unsigned long request, ...)
 		__func__, d, request, argp);
 
 	if (_IOC_TYPE(request) == DRM_IOCTL_BASE) {
-		desc = hash_lookup(&desc_table, d);
-		if (desc)
-			return dummy_ioctl(desc, request, argp);
+		file = hash_lookup(&file_table, d);
+		if (file)
+			return file_ioctl(file, request, argp);
 	}
 
 	return ioctl_real(d, request, argp);
@@ -1253,14 +1423,14 @@ PUBLIC int ioctl(int d, unsigned long request, ...)
 PUBLIC void *mmap(void *addr, size_t length, int prot, int flags,
 		  int fd, off_t offset)
 {
-	struct fakedrm_file_desc *desc;
+	struct fakedrm_file_desc *file;
 
 	VERBOSE_MSG("%s(addr = %p, length = %lx, prot = %d, flags = %d, fd = %d, offset = %lx)",
 		__func__, addr, length, prot, flags, fd, offset);
 
-	desc = hash_lookup(&desc_table, fd);
-	if (desc)
-		return dummy_mmap(desc, addr, length, prot, flags, offset);
+	file = hash_lookup(&file_table, fd);
+	if (file)
+		return file_mmap(file, addr, length, prot, flags, offset);
 
 	return mmap_real(addr, length, prot, flags, fd, offset);
 }
@@ -1280,14 +1450,14 @@ PUBLIC int munmap(void *addr, size_t length)
 
 PUBLIC int __fxstat(int ver, int fd, struct stat *buf)
 {
-	struct fakedrm_file_desc *desc;
+	struct fakedrm_file_desc *file;
 
 	VERBOSE_MSG("%s(ver = %d, fd = %d, buf = %p)",
 		__func__, ver, fd, buf);
 
-	desc = hash_lookup(&desc_table, fd);
-	if (desc)
-		return dummy_fstat(desc, ver, buf);
+	file = hash_lookup(&file_table, fd);
+	if (file)
+		return file_fstat(file, ver, buf);
 
 	return __fxstat_real(ver, fd, buf);
 }
@@ -1320,9 +1490,44 @@ static void *lookup_symbol(const char *name)
 	return symbol;
 }
 
-static void sigint_handler(int signum)
+DESTRUCTOR static void destructor(void)
 {
-	exit(1);
+	unsigned long key;
+	void *value;
+	int ret;
+
+	DEBUG_MSG("cleaning up open handles...");
+
+	ret = drmHashFirst(file_table.table, &key, &value);
+	while (ret) {
+		struct fakedrm_file_desc *file = value;
+
+		__file_close(file);
+
+		ret = drmHashNext(file_table.table, &key, &value);
+	}
+
+	DEBUG_MSG("cleaning up open BO mappings...");
+
+	ret = drmHashFirst(map_table.table, &key, &value);
+	while (ret) {
+		struct fakedrm_map_data *map = value;
+
+		bo_handle_put(map->handle);
+
+		ret = drmHashNext(map_table.table, &key, &value);
+	}
+}
+
+static void signal_handler(int sig)
+{
+	if (__sync_fetch_and_add(&cleanup_in_progress, 1))
+		return;
+
+	destructor();
+
+	signal (sig, SIG_DFL);
+	raise (sig);
 }
 
 CONSTRUCTOR static void constructor(void)
@@ -1337,8 +1542,7 @@ CONSTRUCTOR static void constructor(void)
 	__fxstat_real = lookup_symbol("__fxstat");
 	__xstat_real = lookup_symbol("__xstat");
 
-	hash_create(&bo_table);
-	hash_create(&desc_table);
+	hash_create(&file_table);
 	hash_create(&map_table);
 
 	bo_sem = sem_open("/fakedrm_bo", O_RDWR | O_CREAT,
@@ -1390,38 +1594,8 @@ CONSTRUCTOR static void constructor(void)
 	sigaddset(&captured_signals, SIGABRT);
 	sigaddset(&captured_signals, SIGTRAP);
 
-	signal(SIGINT, sigint_handler);
-	signal(SIGSEGV, sigint_handler);
-	signal(SIGABRT, sigint_handler);
-	signal(SIGTRAP, sigint_handler);
-}
-
-DESTRUCTOR static void destructor(void)
-{
-	unsigned long key;
-	void *value;
-	int ret;
-
-	DEBUG_MSG("cleaning up open BO references...");
-
-	ret = drmHashFirst(bo_table.table, &key, &value);
-	while (ret) {
-		struct fakedrm_bo_data *bo = value;
-
-		bo_put(bo);
-
-		ret = drmHashNext(bo_table.table, &key, &value);
-	}
-
-	DEBUG_MSG("cleaning up open BO mappings...");
-
-	ret = drmHashFirst(map_table.table, &key, &value);
-	while (ret) {
-		struct fakedrm_map_data *map = value;
-
-		bo_put(map->bo);
-		free(map);
-
-		ret = drmHashNext(map_table.table, &key, &value);
-	}
+	signal(SIGINT, signal_handler);
+	signal(SIGSEGV, signal_handler);
+	signal(SIGABRT, signal_handler);
+	signal(SIGTRAP, signal_handler);
 }
