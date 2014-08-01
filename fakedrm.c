@@ -145,7 +145,7 @@ static void hash_create(struct locked_hash_table *table)
  * Dummy file descriptors
  */
 
-struct dummy_drm_desc {
+struct fakedrm_file_desc {
 	int fd;
 	unsigned int refcnt;
 	/* More to come */
@@ -153,12 +153,12 @@ struct dummy_drm_desc {
 
 static struct locked_hash_table desc_table;
 
-static void desc_get(struct dummy_drm_desc *desc)
+static void desc_get(struct fakedrm_file_desc *desc)
 {
 	__sync_add_and_fetch(&desc->refcnt, 1);
 }
 
-static void desc_put(struct dummy_drm_desc *desc)
+static void desc_put(struct fakedrm_file_desc *desc)
 {
 	if (__sync_sub_and_fetch(&desc->refcnt, 1) == 0)
 		free(desc);
@@ -964,7 +964,7 @@ static int dummy_cmd_exynos_g2d_submit(void *arg)
  */
 static int dummy_open(const char *pathname, int flags, mode_t mode)
 {
-	struct dummy_drm_desc *desc;
+	struct fakedrm_file_desc *desc;
 	int fd;
 
 	fd = open_real("/dev/null", O_RDWR, 0);
@@ -990,14 +990,14 @@ static int dummy_open(const char *pathname, int flags, mode_t mode)
 	return fd;
 }
 
-static void dummy_close(struct dummy_drm_desc *desc)
+static void dummy_close(struct fakedrm_file_desc *desc)
 {
 	hash_remove(&desc_table, desc->fd);
 	desc->fd = -1;
 	desc_put(desc);
 }
 
-static int dummy_ioctl(struct dummy_drm_desc *desc, unsigned long request,
+static int dummy_ioctl(struct fakedrm_file_desc *desc, unsigned long request,
 		       void *arg)
 {
 	int ret;
@@ -1098,13 +1098,13 @@ static int dummy_ioctl(struct dummy_drm_desc *desc, unsigned long request,
 	return 0;
 }
 
-static void *dummy_mmap(struct dummy_drm_desc *desc, void *addr, size_t length,
+static void *dummy_mmap(struct fakedrm_file_desc *desc, void *addr, size_t length,
 			int prot, int flags, off_t offset)
 {
 	return MAP_FAILED;
 }
 
-static int dummy_fstat(struct dummy_drm_desc *desc, int ver, struct stat *buf)
+static int dummy_fstat(struct fakedrm_file_desc *desc, int ver, struct stat *buf)
 {
 	/* TODO: Fake stat info */
 	return __fxstat_real(ver, desc->fd, buf);
@@ -1136,7 +1136,7 @@ PUBLIC int open(const char *pathname, int flags, ...)
 
 PUBLIC int close(int fd)
 {
-	struct dummy_drm_desc *desc;
+	struct fakedrm_file_desc *desc;
 
 	VERBOSE_MSG("%s(fd = %d)", __func__, fd);
 
@@ -1150,7 +1150,7 @@ PUBLIC int close(int fd)
 PUBLIC int ioctl(int d, unsigned long request, ...)
 {
 	unsigned dir = _IOC_DIR(request);
-	struct dummy_drm_desc *desc;
+	struct fakedrm_file_desc *desc;
 	char *argp = NULL;
 	va_list args;
 
@@ -1175,7 +1175,7 @@ PUBLIC int ioctl(int d, unsigned long request, ...)
 PUBLIC void *mmap(void *addr, size_t length, int prot, int flags,
 		  int fd, off_t offset)
 {
-	struct dummy_drm_desc *desc;
+	struct fakedrm_file_desc *desc;
 
 	VERBOSE_MSG("%s(addr = %p, length = %lx, prot = %d, flags = %d, fd = %d, offset = %lx)",
 		__func__, addr, length, prot, flags, fd, offset);
@@ -1202,7 +1202,7 @@ PUBLIC int munmap(void *addr, size_t length)
 
 PUBLIC int __fxstat(int ver, int fd, struct stat *buf)
 {
-	struct dummy_drm_desc *desc;
+	struct fakedrm_file_desc *desc;
 
 	VERBOSE_MSG("%s(ver = %d, fd = %d, buf = %p)",
 		__func__, ver, fd, buf);
