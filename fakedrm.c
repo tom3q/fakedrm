@@ -60,27 +60,27 @@
 
 #ifdef DEBUG
 #define DEBUG_MSG(fmt, ...) \
-	do { fprintf(stderr, "[D] "fmt " (%s:%d)\n", \
-		##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
+	do { fprintf(stderr, "[D] (%d) "fmt " (%s:%d)\n", \
+		getpid(), ##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
 #else
 #define DEBUG_MSG(fmt, ...) \
-	if (0) { fprintf(stderr, "[D] "fmt " (%s:%d)\n", \
-		##__VA_ARGS__, __FUNCTION__, __LINE__); }
+	if (0) { fprintf(stderr, "[D] (%d) "fmt " (%s:%d)\n", \
+		getpid(), ##__VA_ARGS__, __FUNCTION__, __LINE__); }
 #endif
 
 #ifdef DEBUG_VERBOSE
 #define VERBOSE_MSG(fmt, ...) \
-	do { fprintf(stderr, "[V] "fmt " (%s:%d)\n", \
-		##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
+	do { fprintf(stderr, "[V] (%d) "fmt " (%s:%d)\n", \
+		getpid(), ##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
 #else
 #define VERBOSE_MSG(fmt, ...) \
-	if (0) { fprintf(stderr, "[V] "fmt " (%s:%d)\n", \
-		##__VA_ARGS__, __FUNCTION__, __LINE__); }
+	if (0) { fprintf(stderr, "[V] (%d) "fmt " (%s:%d)\n", \
+		getpid(), ##__VA_ARGS__, __FUNCTION__, __LINE__); }
 #endif
 
 #define ERROR_MSG(fmt, ...) \
-	do { fprintf(stderr, "[E] "fmt " (%s:%d)\n", \
-		##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
+	do { fprintf(stderr, "[E] (%d) "fmt " (%s:%d)\n", \
+		getpid(), ##__VA_ARGS__, __FUNCTION__, __LINE__); } while (0)
 
 #include "exynos_drm.h"
 
