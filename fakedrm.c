@@ -84,6 +84,8 @@
 
 #include "exynos_drm.h"
 
+static sigset_t captured_signals;
+
 /*
  * Pointers to originals of wrapped functions
  */
@@ -332,8 +334,11 @@ static int bo_import(uint32_t name, uint32_t *handle, uint32_t *size)
 {
 	char pathname[] = "/fakedrm_bo.012345678";
 	struct fakedrm_bo_data *bo;
+	sigset_t oldmask;
 	int obj_shm;
 	int ret;
+
+	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
 
 	snprintf(pathname, sizeof(pathname), "/fakedrm_bo.%08x", name);
 	obj_shm = shm_open(pathname, O_RDWR,
@@ -342,7 +347,7 @@ static int bo_import(uint32_t name, uint32_t *handle, uint32_t *size)
 		ret = -errno;
 		ERROR_MSG("failed to open BO SHM object: %s",
 				strerror(errno));
-		return ret;
+		goto err_sigmask;
 	}
 
 	bo = mmap(NULL, FAKEDRM_BO_SHM_HDR_LENGTH, PROT_READ | PROT_WRITE,
@@ -351,8 +356,7 @@ static int bo_import(uint32_t name, uint32_t *handle, uint32_t *size)
 		ret = -errno;
 		ERROR_MSG("failed to map BO SHM object header: %s",
 				strerror(errno));
-		close(obj_shm);
-		return ret;
+		goto err_shm;
 	}
 
 	*handle = obj_shm;
@@ -362,7 +366,16 @@ static int bo_import(uint32_t name, uint32_t *handle, uint32_t *size)
 
 	hash_insert(&bo_table, obj_shm, bo);
 
+	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+
 	return 0;
+
+err_shm:
+	close(obj_shm);
+err_sigmask:
+	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+
+	return ret;
 }
 
 static int bo_export(uint32_t handle, uint32_t *name)
@@ -386,14 +399,18 @@ static int bo_create(uint32_t size,
 {
 	char pathname[] = "/fakedrm_bo.012345678";
 	struct fakedrm_bo_data *bo;
+	sigset_t oldmask;
 	uint32_t name;
 	int obj_shm;
 	int ret;
 
+	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
+
 	name = bo_get_name();
 	if (!name) {
 		ERROR_MSG("out of free handles");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err_sigmask;
 	}
 
 	snprintf(pathname, sizeof(pathname), "/fakedrm_bo.%08x", name);
@@ -430,6 +447,8 @@ static int bo_create(uint32_t size,
 
 	hash_insert(&bo_table, obj_shm, bo);
 
+	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+
 	return 0;
 
 err_close_unlink:
@@ -437,6 +456,8 @@ err_close_unlink:
 	close(obj_shm);
 err_handle:
 	bo_put_name(name);
+err_sigmask:
+	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 
 	return ret;
 }
@@ -444,6 +465,7 @@ err_handle:
 static void bo_close(uint32_t handle)
 {
 	struct fakedrm_bo_data *bo;
+	sigset_t oldmask;
 
 	bo = hash_lookup(&bo_table, handle);
 	if (!bo) {
@@ -451,16 +473,21 @@ static void bo_close(uint32_t handle)
 		return;
 	}
 
+	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
+
 	hash_remove(&bo_table, handle);
 
 	close(handle);
 	bo_put(bo);
+
+	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 }
 
 static int bo_map(uint32_t handle, void **out_addr)
 {
 	struct fakedrm_map_data *map;
 	struct fakedrm_bo_data *bo;
+	sigset_t oldmask;
 	void *addr = NULL;
 	int ret;
 
@@ -470,10 +497,13 @@ static int bo_map(uint32_t handle, void **out_addr)
 		return -ENOENT;
 	}
 
+	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
+
 	map = calloc(1, sizeof(*map));
 	if (!map) {
 		ERROR_MSG("failed to allocate map data");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err_sigmask;
 	}
 
 	ret = ftruncate(handle, FAKEDRM_BO_SHM_HDR_LENGTH + bo->size);
@@ -481,8 +511,7 @@ static int bo_map(uint32_t handle, void **out_addr)
 		ret = -errno;
 		ERROR_MSG("failed to resize BO SHM object: %s",
 				strerror(errno));
-		free(map);
-		return ret;
+		goto err_data;
 	}
 
 	addr = mmap(NULL, bo->size, PROT_READ | PROT_WRITE, MAP_SHARED,
@@ -490,8 +519,7 @@ static int bo_map(uint32_t handle, void **out_addr)
 	if (addr == MAP_FAILED) {
 		ret = -errno;
 		ERROR_MSG("failed to mmap BO: %s", strerror(errno));
-		free(map);
-		return ret;
+		goto err_data;
 	}
 
 	bo_get(bo);
@@ -500,22 +528,36 @@ static int bo_map(uint32_t handle, void **out_addr)
 	map->addr = addr;
 	hash_insert(&map_table, (unsigned long)addr, map);
 
+	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+
 	*out_addr = addr;
 	return 0;
+
+err_data:
+	free(map);
+err_sigmask:
+	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+
+	return ret;
 }
 
 static int bo_unmap(void *addr, size_t length)
 {
 	struct fakedrm_map_data *map;
+	sigset_t oldmask;
 
 	map = hash_lookup(&map_table, (unsigned long)addr);
 	if (!map)
 		return -ENOENT;
 
+	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
+
 	hash_remove(&map_table, (unsigned long)map->addr);
 	bo_put(map->bo);
 	munmap_real(addr, length);
 	free(map);
+
+	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 
 	return 0;
 }
@@ -1278,6 +1320,11 @@ static void *lookup_symbol(const char *name)
 	return symbol;
 }
 
+static void sigint_handler(int signum)
+{
+	exit(1);
+}
+
 CONSTRUCTOR static void constructor(void)
 {
 	int ret;
@@ -1336,6 +1383,17 @@ CONSTRUCTOR static void constructor(void)
 		exit(1);
 	}
 	bo_ctrl = (struct fakedrm_bo_ctrl *)bo_shm_mem;
+
+	sigemptyset(&captured_signals);
+	sigaddset(&captured_signals, SIGINT);
+	sigaddset(&captured_signals, SIGSEGV);
+	sigaddset(&captured_signals, SIGABRT);
+	sigaddset(&captured_signals, SIGTRAP);
+
+	signal(SIGINT, sigint_handler);
+	signal(SIGSEGV, sigint_handler);
+	signal(SIGABRT, sigint_handler);
+	signal(SIGTRAP, sigint_handler);
 }
 
 DESTRUCTOR static void destructor(void)
@@ -1343,6 +1401,8 @@ DESTRUCTOR static void destructor(void)
 	unsigned long key;
 	void *value;
 	int ret;
+
+	DEBUG_MSG("cleaning up open BO references...");
 
 	ret = drmHashFirst(bo_table.table, &key, &value);
 	while (ret) {
@@ -1352,6 +1412,8 @@ DESTRUCTOR static void destructor(void)
 
 		ret = drmHashNext(bo_table.table, &key, &value);
 	}
+
+	DEBUG_MSG("cleaning up open BO mappings...");
 
 	ret = drmHashFirst(map_table.table, &key, &value);
 	while (ret) {
