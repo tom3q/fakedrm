@@ -257,13 +257,13 @@ struct fakedrm_bo_handle {
 static sem_t *bo_sem;
 static int bo_shm;
 static void *bo_shm_mem;
-static uint32_t *bo_bitmap;
+static volatile uint32_t *bo_bitmap;
 static uint32_t bo_bitmap_size;
-static struct fakedrm_bo_ctrl *bo_ctrl;
+static volatile struct fakedrm_bo_ctrl *bo_ctrl;
 
 static int __bo_remap_bitmap(void)
 {
-	uint32_t *new_bitmap;
+	volatile uint32_t *new_bitmap;
 
 	new_bitmap = mmap(NULL, bo_ctrl->bitmap_size * sizeof(*bo_bitmap),
 				PROT_READ | PROT_WRITE, MAP_SHARED, bo_shm,
@@ -273,7 +273,7 @@ static int __bo_remap_bitmap(void)
 		return -1;
 	}
 
-	munmap(bo_bitmap, bo_bitmap_size * sizeof(*bo_bitmap));
+	munmap((void *)bo_bitmap, bo_bitmap_size * sizeof(*bo_bitmap));
 	bo_bitmap = new_bitmap;
 	bo_bitmap_size = bo_ctrl->bitmap_size;
 
@@ -311,7 +311,7 @@ static uint32_t __bo_grow_bitmap(void)
 		bo_ctrl->bitmap_size = old_size;
 		return 0;
 	}
-	memset(&bo_bitmap[old_size], 0xff, new_bytes - old_bytes);
+	memset((void *)&bo_bitmap[old_size], 0xff, new_bytes - old_bytes);
 
 	bo_bitmap[old_size] &= ~(1 << 0);
 	return old_size * 8 * sizeof(*bo_bitmap) + 1;
