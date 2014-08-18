@@ -1108,6 +1108,14 @@ static int dummy_cmd_exynos_gem_mmap(struct fakedrm_file_desc *file, void *arg)
 	DRM_IOC(DRM_IOC_READ | DRM_IOC_WRITE, DRM_IOCTL_BASE,	\
 		DRM_COMMAND_BASE + DRM_EXYNOS_G2D_SUBMIT,	\
 		sizeof(struct drm_exynos_g3d_submit))
+#define CMD_IOCTL_DRM_EXYNOS_G3D_WAIT			\
+	DRM_IOC(DRM_IOC_WRITE, DRM_IOCTL_BASE,	\
+		DRM_COMMAND_BASE + DRM_EXYNOS_G3D_WAIT,	\
+		sizeof(struct drm_exynos_g3d_wait))
+#define CMD_IOCTL_DRM_EXYNOS_G3D_CPU_PREP			\
+	DRM_IOC(DRM_IOC_WRITE, DRM_IOCTL_BASE,	\
+		DRM_COMMAND_BASE + DRM_EXYNOS_G3D_CPU_PREP,	\
+		sizeof(struct drm_exynos_g3d_cpu_prep))
 
 static int dummy_cmd_exynos_g3d_create_pipe(struct fakedrm_file_desc *file,
 					    void *arg)
@@ -1168,6 +1176,17 @@ static int dummy_cmd_exynos_g2d_submit(struct fakedrm_file_desc *file,
 			submit->pipe, submit->handle, submit->offset,
 			submit->length);
 
+	return 0;
+}
+
+static int dummy_cmd_exynos_g3d_wait(struct fakedrm_file_desc *file, void *arg)
+{
+	return 0;
+}
+
+static int dummy_cmd_exynos_g3d_cpu_prep(struct fakedrm_file_desc *file,
+					 void *arg)
+{
 	return 0;
 }
 
@@ -1320,6 +1339,7 @@ static int file_ioctl(struct fakedrm_file_desc *file, unsigned long request,
 	case CMD_IOCTL_DRM_EXYNOS_G3D_DESTROY_PIPE:
 		ret = dummy_cmd_exynos_g3d_destroy_pipe(file, arg);
 		break;
+
 	case CMD_IOCTL_DRM_EXYNOS_G2D_DESTROY_PIPE:
 		ret = dummy_cmd_exynos_g2d_destroy_pipe(file, arg);
 		break;
@@ -1328,6 +1348,13 @@ static int file_ioctl(struct fakedrm_file_desc *file, unsigned long request,
 		break;
 	case CMD_IOCTL_DRM_EXYNOS_G2D_SUBMIT:
 		ret = dummy_cmd_exynos_g2d_submit(file, arg);
+		break;
+
+	case CMD_IOCTL_DRM_EXYNOS_G3D_WAIT:
+		ret = dummy_cmd_exynos_g3d_wait(file, arg);
+		break;
+	case CMD_IOCTL_DRM_EXYNOS_G3D_CPU_PREP:
+		ret = dummy_cmd_exynos_g3d_cpu_prep(file, arg);
 		break;
 
 	default:
