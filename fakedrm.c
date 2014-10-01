@@ -1057,6 +1057,10 @@ static int dummy_gem_flink(struct fakedrm_file_desc *file, void *arg)
 	DRM_IOC(DRM_IOC_READ | DRM_IOC_WRITE, DRM_IOCTL_BASE,	\
 		DRM_COMMAND_BASE + DRM_EXYNOS_GEM_MMAP,	\
 		sizeof(struct drm_exynos_gem_mmap))
+#define CMD_IOCTL_DRM_EXYNOS_GEM_MAP_OFFSET			\
+	DRM_IOC(DRM_IOC_READ | DRM_IOC_WRITE, DRM_IOCTL_BASE,	\
+		DRM_COMMAND_BASE + DRM_EXYNOS_GEM_MAP_OFFSET,	\
+		sizeof(struct drm_exynos_gem_map_off))
 
 static int dummy_cmd_exynos_gem_create(struct fakedrm_file_desc *file,
 				       void *arg)
@@ -1077,6 +1081,23 @@ static int dummy_cmd_exynos_gem_mmap(struct fakedrm_file_desc *file, void *arg)
 		return ret;
 
 	req->mapped = VOID2U64(addr);
+	return 0;
+}
+
+static int dummy_cmd_exynos_gem_map_offset(struct fakedrm_file_desc *file,
+					   void *arg)
+{
+	struct drm_exynos_gem_map_off *req = arg;
+	struct fakedrm_bo_handle *handle_data;
+
+	handle_data = hash_lookup(&file->bo_table, req->handle);
+	if (!handle_data) {
+		ERROR_MSG("failed to lookup BO handle %08x", req->handle);
+		return -ENOENT;
+	}
+
+	req->offset = req->handle * 4096;
+
 	return 0;
 }
 
@@ -1328,6 +1349,9 @@ static int file_ioctl(struct fakedrm_file_desc *file, unsigned long request,
 	case CMD_IOCTL_DRM_EXYNOS_GEM_MMAP:
 		ret = dummy_cmd_exynos_gem_mmap(file, arg);
 		break;
+	case CMD_IOCTL_DRM_EXYNOS_GEM_MAP_OFFSET:
+		ret = dummy_cmd_exynos_gem_map_offset(file, arg);
+		break;
 
 	/* Exynos-specific pipe IOCTLs */
 	case CMD_IOCTL_DRM_EXYNOS_G3D_CREATE_PIPE:
@@ -1376,7 +1400,22 @@ static int file_ioctl(struct fakedrm_file_desc *file, unsigned long request,
 static void *file_mmap(struct fakedrm_file_desc *file, void *addr,
 		       size_t length, int prot, int flags, off_t offset)
 {
-	return MAP_FAILED;
+	void *out_addr = NULL;
+	uint32_t handle;
+	int ret;
+
+	if (offset % 4096)
+		return MAP_FAILED;
+
+	handle = offset / 4096;
+	if (!handle)
+		return MAP_FAILED;
+
+	ret = bo_map(file, handle, &out_addr);
+	if (ret)
+		return MAP_FAILED;
+
+	return out_addr;
 }
 
 static int file_fstat(struct fakedrm_file_desc *file, int ver, struct stat *buf)
