@@ -46,6 +46,8 @@
 #include <drm.h>
 #include <xf86drmMode.h>
 #include <xf86drm.h>
+#include <linux/kd.h>
+#include <linux/vt.h>
 
 #define U642VOID(x)		((void *)(unsigned long)(x))
 #define VOID2U64(x)		((uint64_t)(unsigned long)(x))
@@ -1444,6 +1446,102 @@ static int file_fstat(struct fakedrm_file_desc *file, int ver, struct stat *buf)
 }
 
 /*
+ * VT IOCTL emulation
+ */
+
+#ifndef K_OFF
+#define K_OFF 0x4
+#endif
+
+#ifndef KDSKBMUTE
+#define KDSKBMUTE 0x4B51
+#endif
+
+static struct vt_stat vt_state = {
+	.v_active = 1,
+};
+
+static struct vt_mode vt_mode;
+
+static int vt_getstate(void *arg)
+{
+	memcpy(arg, &vt_state, sizeof(vt_state));
+
+	return 0;
+}
+
+static int vt_openqry(void *arg)
+{
+	int *free_vt = arg;
+
+	if (free_vt)
+		*free_vt = 1;
+
+	return 0;
+}
+
+static int vt_getmode(void *arg)
+{
+	if (arg)
+		memcpy(arg, &vt_mode, sizeof(vt_mode));
+
+	return 0;
+}
+
+static int vt_setmode(void *arg)
+{
+	if (arg)
+		memcpy(&vt_mode, arg, sizeof(vt_mode));
+
+	return 0;
+}
+
+static int vt_ioctl(unsigned long request, void *arg)
+{
+	int ret;
+
+	switch (request) {
+	case VT_GETSTATE:
+		ret = vt_getstate(arg);
+		break;
+
+	case VT_OPENQRY:
+		ret = vt_openqry(arg);
+		break;
+
+	case VT_GETMODE:
+		ret = vt_getmode(arg);
+		break;
+
+	case VT_SETMODE:
+		ret = vt_setmode(arg);
+		break;
+
+	case KDSETMODE:
+	case KDGKBMODE:
+	case KDSKBMUTE:
+	case VT_ACTIVATE:
+	case VT_WAITACTIVE:
+		ret = 0;
+		break;
+
+	default:
+		ERROR_MSG("%s: Not implemented dummy handler for IOCTL %08lx",
+			__func__, request);
+		ret = -EINVAL;
+	}
+
+	DEBUG_MSG("%s: IOCTL %08lx, ret=%d", __func__, request, ret);
+
+	if (ret) {
+		errno = -ret;
+		return -1;
+	}
+
+	return 0;
+}
+
+/*
  * Syscall wrappers which hook into operations on DRM devices
  */
 
@@ -1464,6 +1562,9 @@ PUBLIC int open(const char *pathname, int flags, ...)
 	if (!strcmp(pathname, "/dev/dri/card0"))
 		return file_open(pathname, flags, mode);
 
+	if (strstr(pathname, "/dev/tty") || strstr(pathname, "/dev/vc/"))
+		return open_real("/dev/null", O_RDWR, 0);
+
 	return open_real(pathname, flags, mode);
 }
 
@@ -1482,19 +1583,19 @@ PUBLIC int close(int fd)
 
 PUBLIC int ioctl(int d, unsigned long request, ...)
 {
-	unsigned dir = _IOC_DIR(request);
 	struct fakedrm_file_desc *file;
 	char *argp = NULL;
 	va_list args;
 
-	if (dir != _IOC_NONE) {
-		va_start(args, request);
-		argp = va_arg(args, char *);
-		va_end(args);
-	}
+	va_start(args, request);
+	argp = va_arg(args, char *);
+	va_end(args);
 
 	VERBOSE_MSG("%s(d = %d, request = %lx, argp = %p)",
 		__func__, d, request, argp);
+
+	if (_IOC_TYPE(request) == 'V' || _IOC_TYPE(request) == 'K')
+		return vt_ioctl(request, argp);
 
 	if (_IOC_TYPE(request) == DRM_IOCTL_BASE) {
 		file = hash_lookup(&file_table, d);
