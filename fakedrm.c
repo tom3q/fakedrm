@@ -1013,6 +1013,22 @@ static int dummy_mode_page_flip(void *arg)
 	return 0;
 }
 
+static int dummy_mode_map_dumb(struct fakedrm_file_desc *file, void *arg)
+{
+	struct drm_mode_map_dumb *req = arg;
+	struct fakedrm_bo_handle *handle_data;
+
+	handle_data = hash_lookup(&file->bo_table, req->handle);
+	if (!handle_data) {
+		ERROR_MSG("failed to lookup BO handle %08x", req->handle);
+		return -ENOENT;
+	}
+
+	req->offset = req->handle * 4096;
+
+	return 0;
+}
+
 /*
  * Generic GEM IOCTLs
  */
@@ -1329,6 +1345,9 @@ static int file_ioctl(struct fakedrm_file_desc *file, unsigned long request,
 		break;
 	case DRM_IOCTL_MODE_PAGE_FLIP:
 		ret = dummy_mode_page_flip(arg);
+		break;
+	case DRM_IOCTL_MODE_MAP_DUMB:
+		ret = dummy_mode_map_dumb(file, arg);
 		break;
 
 	/* Generic GEM IOCTLs */
