@@ -39,6 +39,23 @@
 #include "kms.h"
 #include "utils.h"
 
+static struct fakedrm_driver dummy_driver = {
+	.name = "dummy",
+	.date = "20141011",
+	.desc = "Dummy FakeDRM driver",
+
+	.version_major = 1,
+	.version_minor = 0,
+	.version_patchlevel = 0,
+};
+
+static struct fakedrm_driver *driver = &dummy_driver;
+
+static struct fakedrm_driver *drivers[] = {
+	&dummy_driver,
+	&exynos_driver,
+};
+
 /*
  * Dummy file descriptors
  */
@@ -60,31 +77,24 @@ void __file_put(struct fakedrm_file_desc *file)
 
 /* DRM device IOCTLs */
 
-#define DUMMY_VERSION_MAJOR		1
-#define DUMMY_VERSION_MINOR		0
-#define DUMMY_VERSION_PATCH		0
-#define DUMMY_VERSION_NAME		"exynos"
-#define DUMMY_VERSION_DATE		"20110530"
-#define DUMMY_VERSION_DESC		"Samsung SoC DRM"
-
 static int dummy_version(void *arg)
 {
 	struct drm_version *version = arg;
 
-	version->version_major = DUMMY_VERSION_MAJOR;
-	version->version_minor = DUMMY_VERSION_MINOR;
-	version->version_patchlevel = DUMMY_VERSION_PATCH;
+	version->version_major = driver->version_major;
+	version->version_minor = driver->version_minor;
+	version->version_patchlevel = driver->version_patchlevel;
 
-	version->name_len = strlen(DUMMY_VERSION_NAME);
-	version->date_len = strlen(DUMMY_VERSION_DATE);
-	version->desc_len = strlen(DUMMY_VERSION_DESC);
+	version->name_len = strlen(driver->name);
+	version->date_len = strlen(driver->date);
+	version->desc_len = strlen(driver->desc);
 
 	if (!version->name || !version->date || !version->desc)
 		return 0;
 
-	strcpy(version->name, DUMMY_VERSION_NAME);
-	strcpy(version->date, DUMMY_VERSION_DATE);
-	strcpy(version->desc, DUMMY_VERSION_DESC);
+	strcpy(version->name, driver->name);
+	strcpy(version->date, driver->date);
+	strcpy(version->desc, driver->desc);
 
 	return 0;
 }
@@ -192,13 +202,15 @@ int file_ioctl(struct fakedrm_file_desc *file, unsigned long request, void *arg)
 {
 	int ret;
 
-	ret = exynos_ioctl(file, request, arg);
-	if (ret != -ENOTTY) {
-		if (!ret)
-			return 0;
+	if (driver->ioctl) {
+		ret = driver->ioctl(file, request, arg);
+		if (ret != -ENOTTY) {
+			if (!ret)
+				return 0;
 
-		errno = -ret;
-		return -1;
+			errno = -ret;
+			return -1;
+		}
 	}
 
 	switch (request) {
@@ -404,7 +416,23 @@ int vt_ioctl(unsigned long request, void *arg)
 
 void file_init(void)
 {
+	const char *driver_name;
+	unsigned i;
+
 	hash_create(&file_table);
+
+	driver_name = getenv("FAKEDRM_DRIVER");
+	if (!driver_name)
+		driver_name = "dummy";
+
+	for (i = 0; i < ARRAY_SIZE(drivers); ++i) {
+		if (!strcmp(drivers[i]->name, driver_name)) {
+			driver = drivers[i];
+			break;
+		}
+	}
+
+	DEBUG_MSG("Using FakeDRM driver '%s'", driver->name);
 }
 
 void file_cleanup(void)

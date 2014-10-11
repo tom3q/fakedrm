@@ -192,8 +192,8 @@ static int dummy_cmd_exynos_g3d_cpu_prep(struct fakedrm_file_desc *file,
 	return 0;
 }
 
-int exynos_ioctl(struct fakedrm_file_desc *file, unsigned long request,
-		 void *arg)
+static int exynos_ioctl(struct fakedrm_file_desc *file, unsigned long request,
+			void *arg)
 {
 	switch (request) {
 	/* Exynos-specific GEM IOCTLs */
@@ -230,3 +230,15 @@ int exynos_ioctl(struct fakedrm_file_desc *file, unsigned long request,
 
 	return -ENOTTY;
 }
+
+struct fakedrm_driver exynos_driver = {
+	.name = "exynos",
+	.date = "20110530",
+	.desc = "Samsung SoC DRM",
+
+	.version_major = 1,
+	.version_minor = 0,
+	.version_patchlevel = 0,
+
+	.ioctl = exynos_ioctl,
+};

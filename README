@@ -1,5 +1,40 @@
-Wrapper library providing emulation of kernel DRM interface
+FakeDRM - userspace DRM emulation library
 
-Use with LD_PRELOAD to simulate a fake DRM device on systems without real
-DRM kernel drivers.
+This is FakeDRM, a userspace library providing userspace emulation of
+Linux Direct Rendering Manager kernel interfaces. The library provides
+wrappers for system calls (typically provided by libc) to catch relevant
+operations on DRM devices and emulate them in userspace.
 
+Compiling
+---------
+
+libdrm uses CMake as its build system of choice and follows the typical
+procedures of installation for projects using this build system. The first
+step is to create makefiles by running CMake:
+
+	cmake .
+
+Next step is to build the library:
+
+	make
+
+and once make finishes successfully, install the package using
+
+	make install
+
+Running
+--------
+
+FakeDRM library consists of a binary file called libfakedrm.so, which needs
+to be preloaded for any application which should have kernel DRM interfaces
+emulated in userspace:
+
+	export LD_PRELOAD=/usr/lib/libfakedrm.so
+	./testapp
+
+To support various extensions provided by real kernel DRM drivers,
+an environment variable FAKEDRM_DRIVER is used to select which driver
+should be emulated. Currently supported drivers:
+
+dummy		- dummy FakeDRM driver, providing only generic functionality
+exynos		- Exynos DRM (Samsung SoC DRM),

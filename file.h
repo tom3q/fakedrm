@@ -76,8 +76,24 @@ void file_cleanup(void);
 
 int vt_ioctl(unsigned long request, void *arg);
 
-/* TODO: Replace with driver descriptors */
-int exynos_ioctl(struct fakedrm_file_desc *file, unsigned long request,
-		 void *arg);
+/*
+ * "Driver" model
+ */
+
+struct fakedrm_file_desc;
+
+struct fakedrm_driver {
+	const char *name;
+	const char *date;
+	const char *desc;
+
+	int version_major;
+	int version_minor;
+	int version_patchlevel;
+
+	int (*ioctl)(struct fakedrm_file_desc *, unsigned long, void *);
+};
+
+extern struct fakedrm_driver exynos_driver;
 
 #endif
