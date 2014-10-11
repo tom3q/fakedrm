@@ -13,10 +13,19 @@ include_directories (
 
 add_definitions(-D__USE_GNU=1)
 add_definitions(-D_GNU_SOURCE=1)
-set (CMAKE_C_FLAGS "-Wall -fvisibility=hidden ${CMAKE_C_FLAGS}")
+set (CMAKE_C_FLAGS "-Werror -Wall -fvisibility=hidden ${CMAKE_C_FLAGS}")
 
 add_library(fakedrm SHARED
-	fakedrm.c
+	exynos.c
+	file.c
+	file.h
+	gem.c
+	gem.h
+	kms.c
+	kms.h
+	library.c
+	utils.c
+	utils.h
 	xf86drmHash.c
 )
 
