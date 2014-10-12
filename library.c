@@ -34,6 +34,10 @@
 #include "gem.h"
 #include "utils.h"
 
+#ifndef O_TMPFILE
+#  define O_TMPFILE 0
+#endif
+
 volatile sig_atomic_t cleanup_in_progress;
 sigset_t captured_signals;
 
