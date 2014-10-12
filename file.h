@@ -95,5 +95,6 @@ struct fakedrm_driver {
 };
 
 extern struct fakedrm_driver exynos_driver;
+extern struct fakedrm_driver msm_driver;
 
 #endif

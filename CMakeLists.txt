@@ -17,6 +17,7 @@ set (CMAKE_C_FLAGS "-Werror -Wall -fvisibility=hidden ${CMAKE_C_FLAGS}")
 
 add_library(fakedrm SHARED
 	exynos.c
+	msm.c
 	file.c
 	file.h
 	gem.c

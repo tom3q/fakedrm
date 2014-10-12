@@ -54,6 +54,7 @@ static struct fakedrm_driver *driver = &dummy_driver;
 static struct fakedrm_driver *drivers[] = {
 	&dummy_driver,
 	&exynos_driver,
+	&msm_driver,
 };
 
 /*
