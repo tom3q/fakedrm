@@ -46,6 +46,7 @@ sigset_t captured_signals;
  */
 
 int (*open_real)(const char *, int, ...);
+int (*dup_real)(int fd);
 int (*close_real)(int);
 int (*ioctl_real)(int, unsigned long, ...);
 void *(*mmap_real)(void *, size_t, int, int, int, off_t);
@@ -78,6 +79,18 @@ PUBLIC int open(const char *pathname, int flags, ...)
 		return open_real("/dev/null", O_RDWR, 0);
 
 	return open_real(pathname, flags, mode);
+}
+
+PUBLIC int dup(int fd)
+{
+	struct fakedrm_file_desc *file;
+
+	file = file_lookup(fd);
+	if (file)
+		return file_dup(file, fd);
+
+	return dup_real(fd);
+
 }
 
 PUBLIC int close(int fd)
@@ -213,6 +226,7 @@ static void signal_handler(int sig)
 CONSTRUCTOR static void constructor(void)
 {
 	open_real = lookup_symbol("open");
+	dup_real = lookup_symbol("dup");
 	close_real = lookup_symbol("close");
 	ioctl_real = lookup_symbol("ioctl");
 	mmap_real = lookup_symbol("mmap");

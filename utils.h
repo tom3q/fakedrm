@@ -91,6 +91,7 @@ static inline void *hash_lookup(struct locked_hash_table *table,
 }
 
 extern int (*open_real)(const char *, int, ...);
+extern int (*dup_real)(int fd);
 extern int (*close_real)(int);
 extern int (*ioctl_real)(int, unsigned long, ...);
 extern void *(*mmap_real)(void *, size_t, int, int, int, off_t);

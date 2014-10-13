@@ -128,11 +128,30 @@ static int dummy_auth_magic(void *arg)
 /*
  * Implementation of file operations for emulated DRM devices
  */
-int file_open(const char *pathname, int flags, mode_t mode)
+
+static int __file_init(int fd)
 {
 	struct fakedrm_file_desc *file;
+
+	file = calloc(1, sizeof(*file));
+	if (!file) {
+		ERROR_MSG("failed to allocate file descriptor");
+		return -ENOMEM;
+	}
+
+	hash_create(&file->bo_table);
+	file->fd = fd;
+
+	file_get(file);
+	hash_insert(&file_table, fd, file);
+
+	return 0;
+}
+
+int file_open(const char *pathname, int flags, mode_t mode)
+{
 	sigset_t oldmask;
-	int fd;
+	int fd, ret;
 
 	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
 
@@ -143,18 +162,11 @@ int file_open(const char *pathname, int flags, mode_t mode)
 		goto err_sigmask;
 	}
 
-	file = calloc(1, sizeof(*file));
-	if (!file) {
-		ERROR_MSG("failed to allocate file descriptor");
-		errno = ENOMEM;
+	ret = __file_init(fd);
+	if (ret) {
+		errno = -ret;
 		goto err_close;
 	}
-
-	hash_create(&file->bo_table);
-	file->fd = fd;
-
-	file_get(file);
-	hash_insert(&file_table, fd, file);
 
 	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 
@@ -165,6 +177,26 @@ err_close:
 err_sigmask:
 	pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
 
+	return -1;
+}
+
+int file_dup(struct fakedrm_file_desc *file, int fd)
+{
+	int new_fd, ret;
+
+	new_fd = dup_real(fd);
+	// XXX error checking
+
+	ret = __file_init(new_fd);
+	if (ret) {
+		errno = -ret;
+		goto err_close;
+	}
+
+	return new_fd;
+
+err_close:
+	close_real(new_fd);
 	return -1;
 }
 

@@ -62,6 +62,7 @@ static void __file_put_debug(struct fakedrm_file_desc *file,
 #endif
 
 int file_open(const char *pathname, int flags, mode_t mode);
+int file_dup(struct fakedrm_file_desc *file, int fd);
 void file_close(struct fakedrm_file_desc *file);
 int file_ioctl(struct fakedrm_file_desc *file, unsigned long request,
 	       void *arg);
