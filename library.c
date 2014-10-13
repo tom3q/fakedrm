@@ -137,7 +137,7 @@ PUBLIC void *mmap(void *addr, size_t length, int prot, int flags,
 	struct fakedrm_file_desc *file;
 
 	VERBOSE_MSG("%s(addr = %p, length = %lx, prot = %d, flags = %d, fd = %d, offset = %lx)",
-		__func__, addr, length, prot, flags, fd, offset);
+		__func__, addr, (long unsigned int)length, prot, flags, fd, offset);
 
 	file = file_lookup(fd);
 	if (file)
@@ -150,7 +150,7 @@ PUBLIC int munmap(void *addr, size_t length)
 {
 	int ret;
 
-	VERBOSE_MSG("%s(addr = %p, length = %lx)", __func__, addr, length);
+	VERBOSE_MSG("%s(addr = %p, length = %lx)", __func__, addr, (long unsigned int)length);
 
 	ret = bo_unmap(addr, length);
 	if (ret == -ENOENT)

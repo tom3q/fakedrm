@@ -133,11 +133,8 @@ static uint64_t connector_prop_values[] = {
 
 static struct drm_mode_get_connector connectors[] = {
 	{
-		.modes_ptr = VOID2U64(connector_modes),
 		.count_modes = ARRAY_SIZE(connector_modes),
 
-		.props_ptr = VOID2U64(connector_props),
-		.prop_values_ptr = VOID2U64(connector_prop_values),
 		.count_props = ARRAY_SIZE(connector_props),
 
 		.encoder_id = 1,
@@ -235,6 +232,10 @@ int dummy_mode_getconnector(void *arg)
 		return -ENOENT;
 
 	connector = &connectors[out_resp->connector_id - 1];
+
+	connector->modes_ptr = VOID2U64(connector_modes);
+	connector->props_ptr = VOID2U64(connector_props);
+	connector->prop_values_ptr = VOID2U64(connector_prop_values);
 
 	out_resp->encoder_id = connector->encoder_id;
 	out_resp->connector_id = connector->connector_id;
