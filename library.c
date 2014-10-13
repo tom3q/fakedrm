@@ -50,6 +50,7 @@ int (*dup_real)(int fd);
 int (*close_real)(int);
 int (*ioctl_real)(int, unsigned long, ...);
 void *(*mmap_real)(void *, size_t, int, int, int, off_t);
+void *(*mmap64_real)(void *, size_t, int, int, int, uint64_t);
 int (*munmap_real)(void *, size_t);
 int (*__fxstat_real)(int, int, struct stat *);
 int (*__xstat_real)(int, const char *, struct stat *);
@@ -169,6 +170,21 @@ PUBLIC void *mmap(void *addr, size_t length, int prot, int flags,
 	return mmap_real(addr, length, prot, flags, fd, offset);
 }
 
+PUBLIC void *mmap64(void *addr, size_t length, int prot, int flags,
+		int fd, uint64_t offset)
+{
+	struct fakedrm_file_desc *file;
+
+	VERBOSE_MSG("%s(addr = %p, length = %lx, prot = %d, flags = %d, fd = %d, offset = %llx)",
+		__func__, addr, (long unsigned int)length, prot, flags, fd, (long long unsigned int)offset);
+
+	file = file_lookup(fd);
+	if (file)
+		return file_mmap(file, addr, length, prot, flags, offset);
+
+	return mmap64_real(addr, length, prot, flags, fd, offset);
+}
+
 PUBLIC int munmap(void *addr, size_t length)
 {
 	int ret;
@@ -253,6 +269,7 @@ CONSTRUCTOR static void constructor(void)
 	close_real = lookup_symbol("close");
 	ioctl_real = lookup_symbol("ioctl");
 	mmap_real = lookup_symbol("mmap");
+	mmap64_real = lookup_symbol("mmap64");
 	munmap_real = lookup_symbol("munmap");
 	__fxstat_real = lookup_symbol("__fxstat");
 	__xstat_real = lookup_symbol("__xstat");
