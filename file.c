@@ -105,26 +105,6 @@ static int dummy_get_unique(void *arg)
 	return -EINVAL;
 }
 
-static uint32_t magic;
-
-static int dummy_get_magic(void *arg)
-{
-	struct drm_auth *auth = arg;
-
-	auth->magic = magic;
-
-	return 0;
-}
-
-static int dummy_auth_magic(void *arg)
-{
-	struct drm_auth *auth = arg;
-
-	magic = auth->magic;
-
-	return 0;
-}
-
 /*
  * Implementation of file operations for emulated DRM devices
  */
@@ -155,10 +135,10 @@ int file_open(const char *pathname, int flags, mode_t mode)
 
 	pthread_sigmask(SIG_BLOCK, &captured_signals, &oldmask);
 
-	fd = open_real("/dev/null", O_RDWR, 0);
+	fd = open_real(pathname, O_RDWR, 0);
 	if (!fd) {
-		ERROR_MSG("failed to open '/dev/null': %s",
-			strerror(errno));
+		ERROR_MSG("failed to open '%s': %s",
+			pathname, strerror(errno));
 		goto err_sigmask;
 	}
 
@@ -255,11 +235,8 @@ int file_ioctl(struct fakedrm_file_desc *file, unsigned long request, void *arg)
 		ret = dummy_get_unique(arg);
 		break;
 	case DRM_IOCTL_GET_MAGIC:
-		ret = dummy_get_magic(arg);
-		break;
 	case DRM_IOCTL_AUTH_MAGIC:
-		ret = dummy_auth_magic(arg);
-		break;
+		return ioctl_real(file->fd, request, arg);
 
 	/* Mode setting IOCTLs */
 	case DRM_IOCTL_MODE_GETRESOURCES:
