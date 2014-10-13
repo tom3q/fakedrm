@@ -81,6 +81,29 @@ PUBLIC int open(const char *pathname, int flags, ...)
 	return open_real(pathname, flags, mode);
 }
 
+PUBLIC int open64(const char *pathname, int flags, ...)
+{
+	va_list args;
+	mode_t mode = 0;
+
+	if (flags & (O_CREAT | O_TMPFILE)) {
+		va_start(args, flags);
+		mode = va_arg(args, mode_t);
+		va_end(args);
+	}
+
+	VERBOSE_MSG("%s(pathname = '%s', flags = %d, mode = %x)",
+		__func__, pathname, flags, mode);
+
+	if (strstr(pathname, "/dev/dri/card") == pathname)
+		return file_open(pathname, flags, mode | O_LARGEFILE);
+
+	if (strstr(pathname, "/dev/tty") || strstr(pathname, "/dev/vc/"))
+		return open_real("/dev/null", O_RDWR, O_LARGEFILE);
+
+	return open_real(pathname, flags, mode | O_LARGEFILE);
+}
+
 PUBLIC int dup(int fd)
 {
 	struct fakedrm_file_desc *file;
