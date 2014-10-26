@@ -347,6 +347,7 @@ struct drm_exynos_ipp_cmd_ctrl {
 #define DRM_EXYNOS_G3D_SUBMIT		0x52
 #define DRM_EXYNOS_G3D_WAIT		0x53
 #define DRM_EXYNOS_G3D_CPU_PREP		0x54
+#define DRM_EXYNOS_G3D_CPU_FINI		0x55
 
 #define DRM_EXYNOS_G2D_CREATE_PIPE	0x60
 #define DRM_EXYNOS_G2D_DESTROY_PIPE	0x61
@@ -388,6 +389,8 @@ struct drm_exynos_ipp_cmd_ctrl {
 		DRM_EXYNOS_G3D_DESTROY_PIPE, struct drm_exynos_g3d_pipe)
 #define DRM_IOCTL_EXYNOS_G3D_CPU_PREP		DRM_IOW(DRM_COMMAND_BASE + \
 		DRM_EXYNOS_G3D_CPU_PREP, struct drm_exynos_g3d_cpu_prep)
+#define DRM_IOCTL_EXYNOS_G3D_CPU_FINI		DRM_IOW(DRM_COMMAND_BASE + \
+		DRM_EXYNOS_G3D_CPU_FINI, struct drm_exynos_g3d_cpu_prep)
 
 #define DRM_IOCTL_EXYNOS_G2D_SUBMIT		DRM_IOWR(DRM_COMMAND_BASE + \
 		DRM_EXYNOS_G2D_SUBMIT, struct drm_exynos_g3d_submit)

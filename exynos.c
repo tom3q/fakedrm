@@ -96,6 +96,10 @@ static int dummy_cmd_exynos_gem_create(struct fakedrm_file_desc *file,
 	DRM_IOC(DRM_IOC_WRITE, DRM_IOCTL_BASE,	\
 		DRM_COMMAND_BASE + DRM_EXYNOS_G3D_CPU_PREP,	\
 		sizeof(struct drm_exynos_g3d_cpu_prep))
+#define CMD_IOCTL_DRM_EXYNOS_G3D_CPU_FINI			\
+	DRM_IOC(DRM_IOC_WRITE, DRM_IOCTL_BASE,	\
+		DRM_COMMAND_BASE + DRM_EXYNOS_G3D_CPU_FINI,	\
+		sizeof(struct drm_exynos_g3d_cpu_prep))
 
 static int dummy_cmd_exynos_g3d_create_pipe(struct fakedrm_file_desc *file,
 					    void *arg)
@@ -170,6 +174,7 @@ static int exynos_ioctl(struct fakedrm_file_desc *file, unsigned long request,
 	case CMD_IOCTL_DRM_EXYNOS_G2D_DESTROY_PIPE:
 	case CMD_IOCTL_DRM_EXYNOS_G3D_WAIT:
 	case CMD_IOCTL_DRM_EXYNOS_G3D_CPU_PREP:
+	case CMD_IOCTL_DRM_EXYNOS_G3D_CPU_FINI:
 		return 0;
 
 	default:
