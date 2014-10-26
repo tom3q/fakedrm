@@ -123,18 +123,6 @@ static int dummy_cmd_exynos_g2d_create_pipe(struct fakedrm_file_desc *file,
 	return 0;
 }
 
-static int dummy_cmd_exynos_g3d_destroy_pipe(struct fakedrm_file_desc *file,
-					     void *arg)
-{
-	return 0;
-}
-
-static int dummy_cmd_exynos_g2d_destroy_pipe(struct fakedrm_file_desc *file,
-					     void *arg)
-{
-	return 0;
-}
-
 static int dummy_cmd_exynos_g3d_submit(struct fakedrm_file_desc *file,
 				       void *arg)
 {
@@ -159,17 +147,6 @@ static int dummy_cmd_exynos_g2d_submit(struct fakedrm_file_desc *file,
 	return 0;
 }
 
-static int dummy_cmd_exynos_g3d_wait(struct fakedrm_file_desc *file, void *arg)
-{
-	return 0;
-}
-
-static int dummy_cmd_exynos_g3d_cpu_prep(struct fakedrm_file_desc *file,
-					 void *arg)
-{
-	return 0;
-}
-
 static int exynos_ioctl(struct fakedrm_file_desc *file, unsigned long request,
 			void *arg)
 {
@@ -183,20 +160,17 @@ static int exynos_ioctl(struct fakedrm_file_desc *file, unsigned long request,
 		return dummy_cmd_exynos_g3d_create_pipe(file, arg);
 	case CMD_IOCTL_DRM_EXYNOS_G2D_CREATE_PIPE:
 		return dummy_cmd_exynos_g2d_create_pipe(file, arg);
-	case CMD_IOCTL_DRM_EXYNOS_G3D_DESTROY_PIPE:
-		return dummy_cmd_exynos_g3d_destroy_pipe(file, arg);
 
-	case CMD_IOCTL_DRM_EXYNOS_G2D_DESTROY_PIPE:
-		return dummy_cmd_exynos_g2d_destroy_pipe(file, arg);
 	case CMD_IOCTL_DRM_EXYNOS_G3D_SUBMIT:
 		return dummy_cmd_exynos_g3d_submit(file, arg);
 	case CMD_IOCTL_DRM_EXYNOS_G2D_SUBMIT:
 		return dummy_cmd_exynos_g2d_submit(file, arg);
 
+	case CMD_IOCTL_DRM_EXYNOS_G3D_DESTROY_PIPE:
+	case CMD_IOCTL_DRM_EXYNOS_G2D_DESTROY_PIPE:
 	case CMD_IOCTL_DRM_EXYNOS_G3D_WAIT:
-		return dummy_cmd_exynos_g3d_wait(file, arg);
 	case CMD_IOCTL_DRM_EXYNOS_G3D_CPU_PREP:
-		return dummy_cmd_exynos_g3d_cpu_prep(file, arg);
+		return 0;
 
 	default:
 		break;
