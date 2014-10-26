@@ -60,28 +60,6 @@ static int dummy_cmd_exynos_gem_create(struct fakedrm_file_desc *file,
 	return bo_create(file, req->size, &req->handle);
 }
 
-static int dummy_cmd_exynos_gem_mmap(struct fakedrm_file_desc *file, void *arg)
-{
-	struct drm_exynos_gem_mmap *req = arg;
-	void *addr;
-	int ret;
-
-	ret = bo_map(file, req->handle, &addr);
-	if (ret)
-		return ret;
-
-	req->mapped = VOID2U64(addr);
-	return 0;
-}
-
-static int dummy_cmd_exynos_gem_map_offset(struct fakedrm_file_desc *file,
-					   void *arg)
-{
-	struct drm_exynos_gem_map_off *req = arg;
-
-	return bo_map_offset(file, req->handle, &req->offset);
-}
-
 /*
  * Exynos-specific pipe IOCTLs
  */
@@ -199,10 +177,6 @@ static int exynos_ioctl(struct fakedrm_file_desc *file, unsigned long request,
 	/* Exynos-specific GEM IOCTLs */
 	case CMD_IOCTL_DRM_EXYNOS_GEM_CREATE:
 		return dummy_cmd_exynos_gem_create(file, arg);
-	case CMD_IOCTL_DRM_EXYNOS_GEM_MMAP:
-		return dummy_cmd_exynos_gem_mmap(file, arg);
-	case CMD_IOCTL_DRM_EXYNOS_GEM_MAP_OFFSET:
-		return dummy_cmd_exynos_gem_map_offset(file, arg);
 
 	/* Exynos-specific pipe IOCTLs */
 	case CMD_IOCTL_DRM_EXYNOS_G3D_CREATE_PIPE:
